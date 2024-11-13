@@ -1,4 +1,12 @@
 
+# Code author : Ihsan Fadilah
+# Project     : Levels of 5,6-orthoquinone derivative of primaquine in urine
+#               correlate with CYP2D6 genotype-predicted metabolic activity
+#               score
+# About       : Tidy data for analysis of methaemoglobin data in the first 3
+#               days of enrolment
+
+# Setup -------------------------------------------------------------------
 library(tidyverse)
 library(haven)
 library(readxl)
@@ -9,12 +17,12 @@ library(lubridate)
 raw_dat <- read_excel(path = here('data', 'PRIMA_MetHb Mario.xlsx'),
                       sheet = 'MetHb')
 
-# Demographics
+# Demographics ------------------------------------------------------------
 raw_demog <- raw_dat[, 1:9]
 raw_demog <- raw_demog[3:nrow(raw_demog), ]
 raw_demog <- raw_demog |> row_to_names(1)
 
-demog <- raw_demog |> 
+clean_demog <- raw_demog |> 
   clean_names() |> 
   select(subject_number, group_is_participant_randomised, visit_date,
          day, month, year, what_is_the_sex_of_the_subject) |> 
@@ -37,9 +45,9 @@ demog <- raw_demog |>
   mutate(sex = as.factor(sex),
          group = as.factor(group)) |> 
   arrange(patid)
-  
-# Methaemoglobin
-## Visit 1 (Day 0)
+
+# Methaemoglobin ----------------------------------------------------------
+# Visit 1 (day 0)
 raw_methb_day0 <- raw_dat[, c(1, 10:36)]
 raw_methb_day0 <- raw_methb_day0[3:nrow(raw_methb_day0), ]
 raw_methb_day0_wide <- raw_methb_day0 |> row_to_names(1) |> clean_names()
@@ -84,7 +92,7 @@ raw_methb_day0_long <- full_join(raw_methb_day0_long_timepoint,
                                         'day',
                                         'timepoint'))
 
-## Visit 2 (Day 1)
+# Visit 2 (day 1)
 raw_methb_day1 <- raw_dat[, c(1, 37:63)]
 raw_methb_day1 <- raw_methb_day1[3:nrow(raw_methb_day1), ]
 raw_methb_day1_wide <- raw_methb_day1 |> row_to_names(1) |> clean_names()
@@ -129,7 +137,7 @@ raw_methb_day1_long <- full_join(raw_methb_day1_long_timepoint,
                                         'day',
                                         'timepoint'))
 
-## Visit 3 (Day 2)
+# Visit 3 (day 2)
 raw_methb_day2 <- raw_dat[, c(1, 64:90)]
 raw_methb_day2 <- raw_methb_day2[3:nrow(raw_methb_day2), ]
 raw_methb_day2_wide <- raw_methb_day2 |> row_to_names(1) |> clean_names()
@@ -174,7 +182,7 @@ raw_methb_day2_long <- full_join(raw_methb_day2_long_timepoint,
                                         'day',
                                         'timepoint'))
 
-## Days 0-2
+# Merged: days 0-2
 clean_methb <- bind_rows(raw_methb_day0_long,
                          raw_methb_day1_long,
                          raw_methb_day2_long) |> 
@@ -183,25 +191,5 @@ clean_methb <- bind_rows(raw_methb_day0_long,
   arrange(patid, day, timepoint) |> 
   select(patid, datetime, day, timepoint, methb)
 
-# Treatments
 
-
-# Other lab. measures (CYP2D6, 5,6-orthoquinone, G6PD, ...)
-
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+# Primaquine treatment -----------------------------------------------
