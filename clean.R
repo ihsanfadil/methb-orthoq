@@ -192,4 +192,55 @@ clean_methb <- bind_rows(raw_methb_day0_long,
   select(patid, datetime, day, timepoint, methb)
 
 
-# Primaquine treatment -----------------------------------------------
+# Primaquine treatment ----------------------------------------------------
+# Visit 1 (day 0)
+raw_pq_day0 <- raw_dat[, c(1, 91:106)]
+raw_pq_day0 <- raw_pq_day0[3:nrow(raw_pq_day0), ]
+raw_pq_day0_wide <- raw_pq_day0 |> row_to_names(1) |> clean_names()
+
+# Visit 2 (day 1)
+raw_pq_day1 <- raw_dat[, c(1, 107:122)]
+raw_pq_day1 <- raw_pq_day1[3:nrow(raw_pq_day1), ]
+raw_pq_day1_wide <- raw_pq_day1 |> row_to_names(1) |> clean_names()
+
+# Visit 3 (day 2)
+raw_pq_day2 <- raw_dat[, c(1, 123:160)]
+raw_pq_day2 <- raw_pq_day2[3:nrow(raw_pq_day2), ]
+raw_pq_day2_wide <- raw_pq_day2 |> row_to_names(1) |> clean_names()
+
+# ...
+
+# Other lab. measures (CYP2D6, 5,6-orthoquinone, G6PD, ...) ---------------
+  
+
+# Overall dataset ---------------------------------------------------------
+prima <- full_join(clean_demog,
+                   clean_methb,
+                   by = 'patid') |> 
+  mutate(datetime = ymd_hm(datetime),
+         methb = as.numeric(methb),
+         day = as.factor(day),
+         timepoint = timepoint - 1,
+         day = case_when(day == '0' ~ 'Day 0',
+                         day == '1' ~ 'Day 1',
+                         day == '2' ~ 'Day 2'),
+         timepoint_cont = case_when(
+           day == 'Day 0' ~ timepoint,
+           day == 'Day 1' ~ timepoint + 9,
+           day == 'Day 2' ~ timepoint + 18
+         ))
+  
+write_rds(prima,
+          file = here('data', 'prima.rds'))
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
