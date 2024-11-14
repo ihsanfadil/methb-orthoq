@@ -14,8 +14,13 @@ library(here)
 library(janitor)
 library(lubridate)
 
+# Data --------------------------------------------------------------------
 raw_dat <- read_excel(path = here('data', 'PRIMA_MetHb Mario.xlsx'),
                       sheet = 'MetHb')
+raw_lab <- read_excel(path = here('data', 'dfcomplete3.xlsx'),
+                      sheet = 'Sheet1')
+raw_g6pd <- read_excel(path = here('data', 'G6PD Prima.xlsx'),
+                       sheet = 'Sheet1')
 
 # Demographics ------------------------------------------------------------
 raw_demog <- raw_dat[, 1:9]
@@ -90,7 +95,8 @@ raw_methb_day0_long <- full_join(raw_methb_day0_long_timepoint,
                                  raw_methb_day0_long_methb,
                                  by = c('subject_number',
                                         'day',
-                                        'timepoint'))
+                                        'timepoint')) |> 
+  mutate(day = as.character(day))
 
 # Visit 2 (day 1)
 raw_methb_day1 <- raw_dat[, c(1, 37:63)]
@@ -135,7 +141,8 @@ raw_methb_day1_long <- full_join(raw_methb_day1_long_timepoint,
                                  raw_methb_day1_long_methb,
                                  by = c('subject_number',
                                         'day',
-                                        'timepoint'))
+                                        'timepoint')) |> 
+  mutate(day = as.character(day))
 
 # Visit 3 (day 2)
 raw_methb_day2 <- raw_dat[, c(1, 64:90)]
@@ -180,7 +187,8 @@ raw_methb_day2_long <- full_join(raw_methb_day2_long_timepoint,
                                  raw_methb_day2_long_methb,
                                  by = c('subject_number',
                                         'day',
-                                        'timepoint'))
+                                        'timepoint')) |> 
+  mutate(day = as.character(day))
 
 # Merged: days 0-2
 clean_methb <- bind_rows(raw_methb_day0_long,
@@ -198,25 +206,114 @@ raw_pq_day0 <- raw_dat[, c(1, 91:106)]
 raw_pq_day0 <- raw_pq_day0[3:nrow(raw_pq_day0), ]
 raw_pq_day0_wide <- raw_pq_day0 |> row_to_names(1) |> clean_names()
 
+raw_pq_day0_long <- raw_pq_day0_wide |> 
+  select(subject_number,
+         treatment_name, number_of_tablets,
+         treatment_name_2, number_of_tablets_2) |> 
+  mutate(
+    pq_ntab = case_when(
+      treatment_name == 'PQ' ~ number_of_tablets,
+      treatment_name_2 == 'PQ' ~ number_of_tablets_2,
+      TRUE ~ NA_character_
+    )
+  ) |> 
+  select(subject_number, pq_ntab) |> 
+  mutate(pq_ntab = as.numeric(pq_ntab),
+         day = '0') |> 
+  select(subject_number, day, pq_ntab)
+
 # Visit 2 (day 1)
 raw_pq_day1 <- raw_dat[, c(1, 107:122)]
 raw_pq_day1 <- raw_pq_day1[3:nrow(raw_pq_day1), ]
 raw_pq_day1_wide <- raw_pq_day1 |> row_to_names(1) |> clean_names()
+
+raw_pq_day1_long <- raw_pq_day1_wide |> 
+  select(subject_number,
+         treatment_name, number_of_tablets,
+         treatment_name_2, number_of_tablets_2) |> 
+  mutate(
+    pq_ntab = case_when(
+      treatment_name == 'PQ' ~ number_of_tablets,
+      treatment_name_2 == 'PQ' ~ number_of_tablets_2,
+      TRUE ~ NA_character_
+    )
+  ) |> 
+  select(subject_number, pq_ntab) |> 
+  mutate(pq_ntab = as.numeric(pq_ntab),
+         day = '1') |> 
+  select(subject_number, day, pq_ntab)
 
 # Visit 3 (day 2)
 raw_pq_day2 <- raw_dat[, c(1, 123:160)]
 raw_pq_day2 <- raw_pq_day2[3:nrow(raw_pq_day2), ]
 raw_pq_day2_wide <- raw_pq_day2 |> row_to_names(1) |> clean_names()
 
-# ...
+raw_pq_day2_long <- raw_pq_day2_wide |> 
+  select(subject_number,
+         treatment_name, number_of_tablets,
+         treatment_name_2, number_of_tablets_2,
+         treatment_name_3, number_of_tablets_3,
+         treatment_name_4, number_of_tablets_4) |> 
+  mutate(
+    pq_ntab = case_when(
+      treatment_name_4 == 'PQ' ~ number_of_tablets_4,
+      treatment_name_3 == 'PQ' ~ number_of_tablets_3,
+      treatment_name_2 == 'PQ' ~ number_of_tablets_2,
+      treatment_name == 'PQ' ~ number_of_tablets,
+      TRUE ~ NA_character_
+    )
+  ) |>
+  select(subject_number, pq_ntab) |> 
+  mutate(pq_ntab = as.numeric(pq_ntab),
+         day = '2') |> 
+  select(subject_number, day, pq_ntab)
+
+# Merged: days 0-2
+clean_pq <- bind_rows(raw_pq_day0_long,
+                      raw_pq_day1_long,
+                      raw_pq_day2_long) |> 
+  rename(patid = subject_number) |> 
+  mutate(pqmg_per_tab = NA)
 
 # Other lab. measures (CYP2D6, 5,6-orthoquinone, G6PD, ...) ---------------
-  
+# 5,6-orthoquinone, CYP2D6
+clean_orthoq_cyp2d6 <- raw_lab |> 
+  select(id, cyp2d6, as, oq, mrvalue, as1, as2) |> 
+  rename(patid = id,
+         cyp_score_ori = as,
+         orthoq = oq,
+         metab_ratio = mrvalue,
+         cyp_score1 = as1,
+         cyp_score2 = as2) |> 
+  mutate(cyp_score = case_when(
+    cyp_score1 != cyp_score2 ~ paste(cyp_score1, cyp_score2, sep = '-'),
+    cyp_score1 == cyp_score2 ~ as.character(cyp_score1),
+    TRUE ~ NA_character_
+  )) |> 
+  select(-c(cyp_score_ori))
+
+# G6PD
+raw_g6pd <- raw_g6pd[, c(1, c(14:43))]
+raw_g6pd_wide <- raw_g6pd |> row_to_names(1) |> clean_names()
+
+clean_g6pd <- raw_g6pd_wide |> 
+  select(subject_id, g6pd_per_g_hb, g6pd_per_g_hb_2) |> 
+  rename(patid = subject_id,
+         g6pd1 = g6pd_per_g_hb,
+         g6pd2 = g6pd_per_g_hb_2) |> 
+  mutate(g6pd1 = as.numeric(g6pd1),
+         g6pd2 = as.numeric(g6pd2)) |> 
+  rowwise() |> 
+  mutate(g6pd_avg = mean(c(g6pd1, g6pd2), na.rm = T)) |> 
+  ungroup()
 
 # Overall dataset ---------------------------------------------------------
-prima <- full_join(clean_demog,
-                   clean_methb,
+prima0to2 <- full_join(clean_demog,
+                   clean_methb,,
                    by = 'patid') |> 
+  full_join(clean_pq, by = c('patid', 'day')) |>
+  full_join(clean_orthoq_cyp2d6, by = c('patid')) |> 
+  full_join(clean_g6pd, by = c('patid')) |> 
   mutate(datetime = ymd_hm(datetime),
          methb = as.numeric(methb),
          day = as.factor(day),
@@ -228,12 +325,44 @@ prima <- full_join(clean_demog,
            day == 'Day 0' ~ timepoint,
            day == 'Day 1' ~ timepoint + 9,
            day == 'Day 2' ~ timepoint + 18
-         ))
+         ),
+         pqmgday = pqmg_per_tab * pq_ntab,
+         pqmgkgday = pqmgday / weight,
+         cyp_cat1 = case_when(
+           cyp_score1 == 0 ~ 'Poor',
+           cyp_score1 <= 1 ~ 'Intermediate',
+           cyp_score1 <= 2.25 ~ 'Normal',
+           cyp_score1 > 2.25 ~ 'Ultrarapid'
+           ),
+         cyp_cat2 = case_when(
+           cyp_score1 == 0 ~ 'Poor',
+           cyp_score1 <= 1 ~ 'Intermediate',
+           cyp_score1 <= 2.25 ~ 'Normal',
+           cyp_score1 > 2.25 ~ 'Ultrarapid'
+         )) |> 
+  select(
+    # Demographics
+    patid, clinid, age, sex, weight,
+    
+    # Observation timepoints
+    datetime, day, timepoint, timepoint_cont,
+    
+    # Treatments
+    group, pq_ntab, pqmg_per_tab, pqmgday, pqmgkgday,
+    
+    # Methaemoglobin
+    methb,
+    
+    # Lab. measures
+    cyp2d6, cyp_score1, cyp_score2, cyp_score, cyp_cat1, cyp_cat2,
+    g6pd1, g6pd2, g6pd_avg,
+    orthoq, metab_ratio
+  )
   
-write_rds(prima,
-          file = here('data', 'prima.rds'))
+write_rds(prima0to2,
+          file = here('data', 'prima0to2.rds'))
   
-  
+
   
   
   
