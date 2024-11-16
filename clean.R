@@ -21,6 +21,12 @@ raw_lab <- read_excel(path = here('data', 'dfcomplete3.xlsx'),
                       sheet = 'Sheet1')
 raw_g6pd <- read_excel(path = here('data', 'G6PD Prima.xlsx'),
                        sheet = 'Sheet1')
+raw_weight <- read_excel(path = here('data', 'G6PD Prima_15112024.xlsx')) |> 
+  row_to_names(1) |> 
+  select('Subject ID', Weight) |> 
+  rename(patid = 'Subject ID',
+         weight = Weight) |> 
+  mutate(weight = as.numeric(weight))
 
 # Demographics ------------------------------------------------------------
 raw_demog <- raw_dat[, 1:9]
@@ -314,8 +320,11 @@ prima0to2 <- full_join(clean_demog,
   full_join(clean_pq, by = c('patid', 'day')) |>
   full_join(clean_orthoq_cyp2d6, by = c('patid')) |> 
   full_join(clean_g6pd, by = c('patid')) |> 
+  select(-weight) |> 
+  full_join(raw_weight, by = c('patid')) |> 
   mutate(datetime = ymd_hm(datetime),
          methb = as.numeric(methb),
+         pqmg_per_tab = 15,
          day = as.factor(day),
          timepoint = timepoint - 1,
          day = case_when(day == '0' ~ 'Day 0',
@@ -357,7 +366,20 @@ prima0to2 <- full_join(clean_demog,
     cyp2d6, cyp_score1, cyp_score2, cyp_score, cyp_cat1, cyp_cat2,
     g6pd1, g6pd2, g6pd_avg,
     orthoq, metab_ratio
-  )
+  ) |> 
+  mutate(pqmgkgday_cat = case_when(
+    pqmgkgday < 0.375 ~ 'Low',
+    pqmgkgday < 0.75 ~ 'Intermediate',
+    pqmgkgday >= 0.75 ~ 'High',
+    is.na(pqmgkgday) ~ NA_character_,
+    TRUE ~ 'Check me!') |> 
+      factor(levels = c('Low', 'Intermediate', 'High')))
+
+# Assumed a mismeasurement
+prima0to2 <- prima0to2 |> 
+  mutate(methb = if_else(patid == 'IN-083' &
+                         day == 'Day 0' &
+                         timepoint == 4, NA, methb))
   
 write_rds(prima0to2,
           file = here('data', 'prima0to2.rds'))

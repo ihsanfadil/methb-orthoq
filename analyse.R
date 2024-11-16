@@ -13,6 +13,9 @@ library(haven)
 library(here)
 library(rms)
 library(ggbeeswarm)
+library(lme4)
+library(pracma)
+library(zoo)
 
 # Plot customisation
 # Set plots to some format
@@ -55,11 +58,108 @@ prima0to2 <- read_rds(file = here('data', 'prima0to2.rds')) |>
   ungroup() |> 
   mutate(cyp_cat1 = factor(cyp_cat1, levels = c('Intermediate', 'Normal')))
 
+# Linear interpolation for AUC calculation
+prima0to2_imp <- prima0to2 |> 
+  mutate(imp_methb = if_else(is.na(methb), 'Imputed', 'Observed')) |> 
+  group_by(day, patid) |> 
+  mutate(methb = na.approx(methb, timepoint, na.rm = FALSE),
+         methb = na.locf(methb, na.rm = FALSE),
+         methb = na.locf(methb, fromLast = TRUE, na.rm = FALSE)) |> 
+  ungroup()
+
+prima0to2_imp |> 
+  drop_na(methb) %>% # Do better here!
+  ggplot() +
+  geom_line(aes(x = timepoint,
+                y = log2(methb),
+                group = patid,
+                colour = imp_methb),
+            alpha = 0.7, linewidth = 0.8) +
+  facet_grid(~day) +
+  scale_x_continuous(limits = c(0, 8),
+                     breaks = seq(0, 8, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(0.25, 16)),
+                     breaks = log2(c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32)), 
+                     labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nTimepoint',
+       y = 'Methaemoglobin (%)\n',
+       colour = '',
+       caption = 'Daily pre-dose measurements at timepoint 0') +
+  scale_colour_manual(
+    values = c('Imputed' = '#C82F46',
+               'Observed' = '#536E85')
+  )
+  
+n_patid <- prima0to2$patid |> unique() |> length()
+patid <- prima0to2$patid |> unique()
+timepoint <- prima0to2$timepoint |> unique()
+
+# Day 0
+auc_day0 <- rep(NA, n_patid)
+for (i in 1:n_patid) {
+  id <- patid[i]
+  x <- filter(prima0to2_imp, day == 'Day 0', patid == id) |> select(methb) |> as.vector()
+  methb <- x$methb
+  auc <- trapz(timepoint, methb)
+  auc_day0[i] <- auc
+}
+
+day0_auc <- tibble(patid = patid, methb_auc_dayid = auc_day0, day = 'Day 0')
+
+# Day 1
+auc_day1 <- rep(NA, n_patid)
+for (i in 1:n_patid) {
+  id <- patid[i]
+  x <- filter(prima0to2_imp, day == 'Day 1', patid == id) |> select(methb) |> as.vector()
+  methb <- x$methb
+  auc <- trapz(timepoint, methb)
+  auc_day1[i] <- auc
+}
+
+day1_auc <- tibble(patid = patid, methb_auc_dayid = auc_day1, day = 'Day 1')
+
+# Day 2
+auc_day2 <- rep(NA, n_patid)
+for (i in 1:n_patid) {
+  id <- patid[i]
+  x <- filter(prima0to2_imp, day == 'Day 2', patid == id) |> select(methb) |> as.vector()
+  methb <- x$methb
+  auc <- trapz(timepoint, methb)
+  auc_day2[i] <- auc
+}
+
+day2_auc <- tibble(patid = patid, methb_auc_dayid = auc_day2, day = 'Day 2')
+
+methb_auc <- bind_rows(day0_auc, day1_auc, day2_auc)
+
+prima0to2 <- left_join(prima0to2, methb_auc, by = c('day', 'patid'))
+
+# At timepoint == 0 only
 prima_base <- prima0to2 |>
   filter(timepoint == 0) |> 
-  select(-c(clinid, weight, pqmg_per_tab, pqmgday, pqmgkgday))
+  select(-c(clinid))
 
 # Graphical, non-summary --------------------------------------------------
+# Primaquine daily dose
+prima_base |> 
+  ggplot() +
+  geom_histogram(aes(pqmgkgday, fill = group), bins = 23) +
+  geom_vline(xintercept = 1, linetype = 'dotted') +
+  scale_x_continuous(limits = c(0, 1.5),
+                     breaks = seq(0, 1.5, by = 0.1),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  theme(aspect.ratio = 0.75) +
+  labs(x = '\nPrimaquine daily dose (mg/kg)',
+       y = 'Count\n',
+       fill = 'Treatment allocation') +
+  scale_fill_manual(
+    values = c('Intervention' = '#C82F46',
+               'Control' = '#536E85')
+  )
+
 # Methaemoglobin over timepoints, by day
 prima0to2 %>%
   drop_na(methb) %>% # Do better here!
@@ -104,52 +204,42 @@ prima0to2 %>%
        y = 'Methaemoglobin (%)\n',
        caption = 'Daily pre-dose measurements at timepoints 0, 9, and 18')
 
-# Last timepoint but base timepoint?
-# Important for overall time-series
-
-# Graphical, summary ------------------------------------------------------
-# Boxplots, by day
-prima0to2 |> 
-  mutate(timepoint = factor(timepoint)) |> 
+# Methaemoglobin over timepoints, connected (by CYP2D6)
+prima0to2 %>%
+  drop_na(methb) %>% # Do better here!
   ggplot() +
-  geom_boxplot(aes(x = timepoint, y = log2(methb)),
-               varwidth = TRUE, fill = 'transparent',
-               outlier.alpha = 0.5, outlier.size = 0.7,
-               width = 0.7, linewidth = 0.3) +
-  facet_wrap(~day) +
-  scale_y_continuous(limits = log2(c(0.25, 16)),
-                     breaks = log2(c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32)), 
-                     labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
-                     expand = expansion(mult = c(0, 0))) +
-  labs(x = '\nTimepoint',
-       y = 'Methaemoglobin (%)\n',
-       caption = 'Daily pre-dose measurements at timepoint 0')
-
-# Boxplots over timepoints, connected
-prima0to2 |> 
-  ggplot() +
-  annotate("rect", xmin = c(8, 17), xmax = c(9, 18),
-           ymin = -Inf, ymax = Inf,
+  annotate("rect", xmin = c(8, 17), xmax = c(9, 18), ymin = -Inf, ymax = Inf,
            fill = '#918580', alpha = 0.3) +
   geom_vline(xintercept = c(0, 9, 18),
              linetype = 'dotted') +
-  geom_boxplot(aes(x = timepoint_cont, y = log2(methb), group = timepoint_cont),
-               varwidth = TRUE, fill = 'transparent',
-               outlier.alpha = 0.5, outlier.size = 0.7,
-               width = 0.55, linewidth = 0.3) +
-  scale_x_continuous(limits = c(-0.6, 26.6),
+  geom_line(aes(x = timepoint_cont,
+                y = log2(methb),
+                group = patid,
+                colour = cyp_cat1),
+            alpha = 0.7, linewidth = 0.8) +
+  scale_x_continuous(limits = c(0, 26),
                      breaks = seq(0, 26, by = 1),
                      expand = expansion(mult = c(0, 0))) +
   scale_y_continuous(limits = log2(c(0.25, 16)),
                      breaks = log2(c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32)), 
                      labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
                      expand = expansion(mult = c(0, 0))) +
-  theme(panel.grid.major.x = element_blank(),
-        aspect.ratio = 0.425) +
+  theme(aspect.ratio = 0.4,
+        legend.key.width = unit(0.3, 'cm')) +
   labs(x = '\nTimepoint',
        y = 'Methaemoglobin (%)\n',
-       caption = 'Daily pre-dose measurements at timepoints 0, 9, and 18')
-  
+       colour = 'CYP2D6 activity',
+       caption = 'Daily pre-dose measurements at timepoints 0, 9, and 18') +
+  scale_colour_manual(
+    values = c('Intermediate' = '#C82F46',
+               'Normal' = '#536E85')
+  )
+
+# Last timepoint but base timepoint?
+# Important for overall time-series
+# Likely not completely reliable after scrutinising the raw dataset
+
+# Graphical, summary ------------------------------------------------------
 # Lines, by day (median)
 prima0to2_q50 <- prima0to2 |>
   select(patid, day, timepoint, methb_q50) |> 
@@ -196,9 +286,51 @@ prima0to2 %>%
                'Maximum' = '#C82F46')
   )
 
-# Boxplot, by day
+# Boxplots, by day
 prima0to2 |> 
-  filter(timepoint == 0) |> 
+  mutate(timepoint = factor(timepoint)) |> 
+  ggplot() +
+  geom_boxplot(aes(x = timepoint, y = log2(methb)),
+               varwidth = TRUE, fill = 'transparent',
+               outlier.alpha = 0.5, outlier.size = 0.7,
+               width = 0.7, linewidth = 0.3) +
+  facet_wrap(~day) +
+  scale_y_continuous(limits = log2(c(0.25, 16)),
+                     breaks = log2(c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32)), 
+                     labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nTimepoint',
+       y = 'Methaemoglobin (%)\n',
+       caption = 'Daily pre-dose measurements at timepoint 0')
+
+# Boxplots over timepoints, connected
+prima0to2 |> 
+  ggplot() +
+  annotate("rect", xmin = c(8, 17), xmax = c(9, 18),
+           ymin = -Inf, ymax = Inf,
+           fill = '#918580', alpha = 0.3) +
+  geom_vline(xintercept = c(0, 9, 18),
+             linetype = 'dotted') +
+  geom_boxplot(aes(x = timepoint_cont, y = log2(methb), group = timepoint_cont),
+               varwidth = TRUE, fill = 'transparent',
+               outlier.alpha = 0.5, outlier.size = 0.7,
+               width = 0.55, linewidth = 0.3) +
+  scale_x_continuous(limits = c(-0.6, 26.6),
+                     breaks = seq(0, 26, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(0.25, 16)),
+                     breaks = log2(c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32)), 
+                     labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
+                     expand = expansion(mult = c(0, 0))) +
+  theme(panel.grid.major.x = element_blank(),
+        aspect.ratio = 0.425) +
+  labs(x = '\nTimepoint',
+       y = 'Methaemoglobin (%)\n',
+       caption = 'Daily pre-dose measurements at timepoints 0, 9, and 18')
+
+# Boxplot, by day
+## Maximum
+prima_base |> 
   ggplot() +
   geom_beeswarm(aes(y = log2(methb_max_dayid), x = day),
                 groupOnX = F, alpha = 0.3, size = 1.25) +
@@ -217,10 +349,32 @@ prima0to2 |>
   labs(x = '',
        y = 'Maximum methaemoglobin (%)\n')
 
+## AUC
+upper_half <- 2^((log2(64) + log2(128))/2)
+lower_half <- 2^((log2(2) + log2(4))/2)
+prima_base |> 
+  ggplot() +
+  geom_beeswarm(aes(y = log2(methb_auc_dayid), x = day),
+                groupOnX = F, alpha = 0.3, size = 1.25) +
+  geom_boxplot(aes(y = log2(methb_auc_dayid), x = day),
+               varwidth = T, # !!!
+               fill = 'transparent', outlier.shape = NA,
+               outlier.alpha = 0.5, outlier.size = 0.7,
+               width = 0.5, linewidth = 0.5) +
+  scale_x_discrete(expand = expansion(mult = c(0.25, 0.25))) +
+  theme(panel.grid.major.x = element_blank(),
+        legend.key.width = unit(0.4, 'cm')) +
+  scale_y_continuous(limits = log2(c(lower_half, upper_half)),
+                     breaks = log2(c(2, 4, 8, 16, 32, 64, 128)),
+                     labels = c(2, 4, 8, 16, 32, 64, 128),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '',
+       y = 'Methaemoglobin AUC\n')
+
 # Lines, by day and CYP2D6 group
-prima0to2 |>
+## Maximum
+prima_base |>
   drop_na(cyp_cat1) |> 
-  filter(timepoint == 0) |> 
   ggplot() +
   geom_point(aes(y = log2(methb_max_dayid), x = day, colour = cyp_cat1),
              alpha = 1, size = 1.2) +
@@ -241,10 +395,80 @@ prima0to2 |>
                'Normal' = '#536E85')
   )
 
+## AUC
+prima_base |>
+  drop_na(cyp_cat1) |> 
+  ggplot() +
+  geom_point(aes(y = log2(methb_auc_dayid), x = day, colour = cyp_cat1),
+             alpha = 1, size = 1.2) +
+  geom_line(aes(y = log2(methb_auc_dayid), x = day, group = patid, colour = cyp_cat1),
+            alpha = 0.3, size = 0.7) +
+  theme(panel.grid.major.x = element_blank(),
+        legend.key.width = unit(0.4, 'cm')) +
+  scale_x_discrete(expand = expansion(mult = c(0.1, 0.1))) +
+  scale_y_continuous(limits = log2(c(lower_half, upper_half)),
+                     breaks = log2(c(2, 4, 8, 16, 32, 64, 128)),
+                     labels = c(2, 4, 8, 16, 32, 64, 128),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '',
+       y = 'Methaemoglobin AUC\n',
+       colour = 'CYP2D6 activity') +
+  scale_colour_manual(
+    values = c('Intermediate' = '#C82F46',
+               'Normal' = '#536E85')
+  )
+
 # Maximum methaemoglobin, by day and some factor
+## Primaquine dose
+### Maximum
+prima_base |> 
+  drop_na(cyp_cat1) |> 
+  ggplot() +
+  geom_vline(xintercept = 1, linetype = 'dotted') +
+  geom_point(aes(y = log2(methb_max_dayid), x = pqmgkgday),
+             size = 1.5, alpha = 1) +
+  geom_smooth(aes(x = pqmgkgday, y = log2(methb_max_dayid)),
+              method = "lm", se = F, linewidth = 0.8, colour = '#C82F46') +
+  scale_y_continuous(limits = log2(c(0.6, 14)),
+                     breaks = log2(c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32)), 
+                     labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(limits = c(0.9, 1.3),
+                     breaks = seq(0.8, 1.4, by = 0.1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(y = 'Maximum methaemoglobin (%)\n',
+       x = '\nPrimaquine daily dose (mg/kg)',
+       colour = '') +
+  theme(legend.key.width = unit(0.5, 'cm'),
+        panel.spacing = unit(1.3, "lines"),) +
+  facet_wrap(~day)
+
+### AUC
+prima_base |> 
+  drop_na(cyp_cat1) |> 
+  ggplot() +
+  geom_vline(xintercept = 1, linetype = 'dotted') +
+  geom_point(aes(y = log2(methb_auc_dayid), x = pqmgkgday),
+             size = 1.5, alpha = 1) +
+  geom_smooth(aes(x = pqmgkgday, y = log2(methb_auc_dayid)),
+              method = "lm", se = F, linewidth = 0.8, colour = '#C82F46') +
+  scale_y_continuous(limits = log2(c(lower_half, upper_half)),
+                     breaks = log2(c(2, 4, 8, 16, 32, 64, 128)),
+                     labels = c(2, 4, 8, 16, 32, 64, 128),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(limits = c(0.9, 1.3),
+                     breaks = seq(0.8, 1.4, by = 0.1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(y = 'Methaemoglobin AUC\n',
+       x = '\nPrimaquine daily dose (mg/kg)',
+       colour = '') +
+  theme(legend.key.width = unit(0.5, 'cm'),
+        panel.spacing = unit(1.3, "lines")) +
+  facet_wrap(~day)
+
 ## CYP2D6
-prima0to2 |> 
-  filter(timepoint == 0) |> 
+### Maximum
+prima_base |> 
   drop_na(cyp_cat1) |> 
   ggplot() +
   geom_beeswarm(aes(y = log2(methb_max_dayid), x = day, colour = cyp_cat1),
@@ -269,40 +493,87 @@ prima0to2 |>
                'Normal' = '#536E85')
   )
 
-## 5,6-orthoquinone
-prima0to2 |> 
-  filter(timepoint == 0) |> 
-  mutate(log_orthoq = log(orthoq)) |> 
+### AUC
+prima_base |> 
+  drop_na(cyp_cat1) |> 
   ggplot() +
-  geom_point(aes(x = log_orthoq, y = log2(methb_max_dayid), colour = day),
-             size = 1.5, alpha = 0.35) +
-  geom_smooth(aes(x = log_orthoq, y = log2(methb_max_dayid), colour = day),
-              method = "lm", se = F, linewidth = 0.8) +
-  scale_x_continuous(limits = c(4.5, 8),
-                     breaks = seq(0, 20, by = 1),
+  geom_beeswarm(aes(y = log2(methb_auc_dayid), x = day, colour = cyp_cat1),
+                dodge.width = 0.65, groupOnX = F, alpha = 0.3, size = 1.25) +
+  geom_boxplot(aes(y = log2(methb_auc_dayid), x = day, colour = cyp_cat1),
+               varwidth = F, # !!!
+               fill = 'transparent', outlier.shape = NA,
+               outlier.alpha = 0.5, outlier.size = 0.7,
+               width = 0.65, linewidth = 0.5) +
+  theme(panel.grid.major.x = element_blank(),
+        legend.key.width = unit(0.4, 'cm')) +
+  scale_x_discrete(expand = expansion(mult = c(0.25, 0.25))) +
+  scale_y_continuous(limits = log2(c(lower_half, upper_half)),
+                     breaks = log2(c(2, 4, 8, 16, 32, 64, 128)),
+                     labels = c(2, 4, 8, 16, 32, 64, 128),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '',
+       y = 'Methaemoglobin AUC\n',
+       colour = 'CYP2D6 activity') +
+  scale_colour_manual(
+    values = c('Intermediate' = '#C82F46',
+               'Normal' = '#536E85')
+  )
+
+## 5,6-orthoquinone
+### Maximum
+prima_base |> 
+  drop_na(cyp_cat1) |> 
+  ggplot() +
+  geom_point(aes(x = log2(orthoq), y = log2(methb_max_dayid)),
+             size = 1.5, alpha = 1) +
+  geom_smooth(aes(x = log2(orthoq), y = log2(methb_max_dayid)),
+              method = "lm", se = F, linewidth = 0.8, colour = '#C82F46') +
+  scale_x_continuous(limits = log2(c(64, 3000)),
+                     breaks = log2(2^seq(1, 15, by = 1)),
+                     labels = 2^seq(1, 15, by = 1),
                      expand = expansion(mult = c(0, 0))) +
   scale_y_continuous(limits = log2(c(0.6, 14)),
                      breaks = log2(c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32)), 
                      labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
                      expand = expansion(mult = c(0, 0))) +
-  labs(x = '\nNatural logarithm of 5,6-orthoquinone',
+  labs(x = '\n5,6-orthoquinone (ng/ml)',
        y = 'Maximum methaemoglobin (%)\n',
+       colour = 'CYP2D6 activity') +
+  theme(legend.key.width = unit(0.5, 'cm'),
+        legend.position = 'top',
+        panel.spacing = unit(1.1, "lines")) +
+  facet_wrap(~day)
+
+### AUC
+prima_base |> 
+  ggplot() +
+  geom_point(aes(x = log2(orthoq), y = log2(methb_auc_dayid)),
+             size = 1.5, alpha = 1) +
+  geom_smooth(aes(x = log2(orthoq), y = log2(methb_auc_dayid)),
+              method = "lm", se = F, linewidth = 0.8, colour = '#C82F46') +
+  scale_x_continuous(limits = log2(c(64, 3000)),
+                     breaks = log2(2^seq(1, 15, by = 1)),
+                     labels = 2^seq(1, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(lower_half, upper_half)),
+                     breaks = log2(c(2, 4, 8, 16, 32, 64, 128)),
+                     labels = c(2, 4, 8, 16, 32, 64, 128),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\n5,6-orthoquinone (ng/ml)',
+       y = 'Methaemoglobin AUC\n',
        colour = '') +
-  scale_colour_manual(
-    values = c('Day 0' = '#536E85',
-               'Day 1' = '#E3932B',
-               'Day 2' = '#C82F46')
-  ) +
-  theme(legend.key.width = unit(0.5, 'cm'))
+  theme(legend.key.width = unit(0.5, 'cm'),
+        panel.spacing = unit(1.1, "lines")) +
+  facet_wrap(~day)
 
 ## G6PD
-prima0to2 |> 
-  filter(timepoint == 0) |> 
+### Maximum
+prima_base |> 
   ggplot() +
-  geom_point(aes(x = g6pd1, y = log2(methb_max_dayid), colour = day),
-             size = 1.5, alpha = 0.35) +
-  geom_smooth(aes(x = g6pd1, y = log2(methb_max_dayid), colour = day),
-              method = "lm", se = F, linewidth = 0.8) +
+  geom_point(aes(x = g6pd1, y = log2(methb_max_dayid)),
+             size = 1.5, alpha = 1) +
+  geom_smooth(aes(x = g6pd1, y = log2(methb_max_dayid)),
+              method = "lm", se = F, linewidth = 0.8, colour = '#C82F46') +
   scale_x_continuous(limits = c(6, 12.5),
                      breaks = seq(0, 20, by = 1),
                      expand = expansion(mult = c(0, 0))) +
@@ -313,37 +584,337 @@ prima0to2 |>
   labs(x = '\nG6PD activity (IU/gHb)',
        y = 'Maximum methaemoglobin (%)\n',
        colour = '') +
+  theme(legend.key.width = unit(0.5, 'cm')) +
+  facet_wrap(~day)
+
+### AUC
+prima_base |> 
+  ggplot() +
+  geom_point(aes(x = g6pd1, y = log2(methb_auc_dayid)),
+             size = 1.5, alpha = 1) +
+  geom_smooth(aes(x = g6pd1, y = log2(methb_auc_dayid)),
+              method = "lm", se = F, linewidth = 0.8, colour = '#C82F46') +
+  scale_x_continuous(limits = c(6, 12.5),
+                     breaks = seq(0, 20, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(lower_half, upper_half)),
+                     breaks = log2(c(2, 4, 8, 16, 32, 64, 128)),
+                     labels = c(2, 4, 8, 16, 32, 64, 128),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nG6PD activity (IU/gHb)',
+       y = 'Methaemoglobin AUC\n',
+       colour = '') +
+  theme(legend.key.width = unit(0.5, 'cm')) +
+  facet_wrap(~day)
+
+## Methaemoglobin with daily dose, by CYP2D6
+### Maximum
+prima_base |> 
+  drop_na(cyp_cat1) |> 
+  ggplot() +
+  geom_vline(xintercept = 1, linetype = 'dotted') +
+  geom_point(aes(y = log2(methb_max_dayid), x = pqmgkgday, colour = cyp_cat1),
+             size = 1.5, alpha = 0.35) +
+  geom_smooth(aes(x = pqmgkgday, y = log2(methb_max_dayid), colour = cyp_cat1),
+              method = "lm", se = F, linewidth = 0.8) +
+  scale_y_continuous(limits = log2(c(0.6, 14)),
+                     breaks = log2(c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32)), 
+                     labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(limits = c(0.9, 1.3),
+                     breaks = seq(0.8, 1.4, by = 0.1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(y = 'Maximum methaemoglobin (%)\n',
+       x = '\nPrimaquine daily dose (mg/kg)',
+       colour = 'CYP2D6 activity') +
   scale_colour_manual(
-    values = c('Day 0' = '#536E85',
-               'Day 1' = '#E3932B',
-               'Day 2' = '#C82F46')
+    values = c('Normal' = '#536E85',
+               'Intermediate' = '#C82F46')
   ) +
-  theme(legend.key.width = unit(0.5, 'cm'))
+  theme(legend.key.width = unit(0.5, 'cm'),
+        legend.position = 'top',
+        panel.spacing = unit(1.3, "lines"),
+        plot.margin = margin(10, 10, 10, 10)) +
+  facet_wrap(~day)
 
-# Maximum methaemoglobin on day 2, by some factor
-## Age
+### AUC
+prima_base |> 
+  drop_na(cyp_cat1) |> 
+  ggplot() +
+  geom_vline(xintercept = 1, linetype = 'dotted') +
+  geom_point(aes(y = log2(methb_auc_dayid), x = pqmgkgday, colour = cyp_cat1),
+             size = 1.5, alpha = 0.35) +
+  geom_smooth(aes(x = pqmgkgday, y = log2(methb_auc_dayid), colour = cyp_cat1),
+              method = "lm", se = F, linewidth = 0.8) +
+  scale_y_continuous(limits = log2(c(lower_half, upper_half)),
+                     breaks = log2(c(2, 4, 8, 16, 32, 64, 128)),
+                     labels = c(2, 4, 8, 16, 32, 64, 128),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(limits = c(0.9, 1.3),
+                     breaks = seq(0.8, 1.4, by = 0.1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(y = 'Methaemoglobin AUC\n',
+       x = '\nPrimaquine daily dose (mg/kg)',
+       colour = 'CYP2D6 activity') +
+  scale_colour_manual(
+    values = c('Normal' = '#536E85',
+               'Intermediate' = '#C82F46')
+  ) +
+  theme(legend.key.width = unit(0.5, 'cm'),
+        legend.position = 'top',
+        panel.spacing = unit(1.3, "lines"),
+        plot.margin = margin(10, 10, 10, 10)) +
+  facet_wrap(~day)
 
+## 5,6-orthoquinone with ...
+cyp_score <- prima_base$cyp_score1 |> unique()
+cyp_score <- cyp_score[2:length(cyp_score)]
 
-## Sex
+### Maximum
+prima_base |> 
+  drop_na(cyp_cat1) |> 
+  filter(day == 'Day 2') |> 
+  ggplot() +
+  geom_vline(xintercept = 1, linetype = 'dotted') +
+  geom_point(aes(y = log2(orthoq), x = pqmgkgday, colour = cyp_cat1),
+             size = 1.5, alpha = 0.35) +
+  geom_smooth(aes(x = pqmgkgday, y = log2(orthoq), colour = cyp_cat1),
+              method = "lm", se = F, linewidth = 0.8) +
+  scale_y_continuous(limits = log2(c(64, 3000)),
+                     breaks = log2(2^seq(1, 15, by = 1)),
+                     labels = 2^seq(1, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(limits = c(0.9, 1.3),
+                     breaks = seq(0.8, 1.4, by = 0.1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(y = '5,6-orthoquinone (ng/ml)\n',
+       x = '\nPrimaquine daily dose (mg/kg)',
+       colour = 'CYP2D6 activity') +
+  scale_colour_manual(
+    values = c('Normal' = '#536E85',
+               'Intermediate' = '#C82F46')
+  ) +
+  theme(legend.key.width = unit(0.5, 'cm'),
+        # legend.position = 'top',
+        panel.spacing = unit(1.3, "lines"),
+        plot.margin = margin(10, 10, 10, 10))
 
-
-## CYP2D6
-
-
-## G6PD
-
-
-## Primaquine daily dose
-
+# ### Misc.
+# prima_base |> 
+#   drop_na(cyp_cat1) |> 
+#   ggplot() +
+#   geom_vline(xintercept = 1, linetype = 'dotted') +
+#   geom_point(aes(y = log2(orthoq), x = cyp_score1),
+#              size = 1.5, alpha = 0.35) +
+#   geom_smooth(aes(x = cyp_score1, y = log2(orthoq)),
+#               method = "lm", se = F, linewidth = 0.8) +
+#   scale_y_continuous(limits = log2(c(64, 3000)),
+#                      breaks = log2(2^seq(1, 15, by = 1)),
+#                      labels = 2^seq(1, 15, by = 1),
+#                      expand = expansion(mult = c(0, 0))) +
+#   scale_x_continuous(breaks = seq(0.25, 2, by = 0.25)) +
+#   labs(y = '5,6-orthoquinone (ng/ml)\n',
+#        x = '\nCYP2D6 activity score')
 
 # Models ------------------------------------------------------------------
+prima_base_d2 <- prima_base |>
+  filter(day == 'Day 2') |>
+  drop_na(methb_max_dayid) |> 
+  mutate(log2_orthoq = log2(orthoq),
+         log2_methb = log2(methb_max_dayid),
+         log2_methb_auc = log2(methb_auc_dayid),
+         methb = methb_max_dayid,
+         methb_auc = methb_auc_dayid,
+         orthoq1000 = orthoq/1000)
+dd <- datadist(prima_base_d2)
+options(datadist = 'dd')
 
+# AUC
+q2a_auc <- ols(log2_methb_auc ~ cyp_cat1, data = prima_base_d2); anova(q2a_auc)
+ttest_auc <- t.test(log2_methb_auc ~ cyp_cat1, data = prima_base_d2, var.equal = T); ttest_auc
+ttest_mean_auc <- ttest_auc$estimate
+ttest_df <- tibble(
+  cyp_cat1 = c('Intermediate', 'Normal'),
+  methb = ttest_mean_auc,
+  methb2 = 2^methb
+)
+q2a2_auc <- ols(log2_methb_auc ~ cyp_score1, data = prima_base_d2); anova(q2a2_auc)
+q2a3_auc <- ols(log2_methb_auc ~ cyp_score2, data = prima_base_d2); anova(q2a3_auc)
 
+# Maximum
+# Question 2a
+# On day 2, methaemoglobin with CYP2D6 activity
+q2a <- ols(log2_methb ~ cyp_cat1, data = prima_base_d2); anova(q2a)
+ttest <- t.test(log2_methb ~ cyp_cat1, data = prima_base_d2, var.equal = T); ttest
+ttest_mean <- ttest$estimate
+ttest_df <- tibble(
+  cyp_cat1 = c('Intermediate', 'Normal'),
+  methb = ttest_mean,
+  methb2 = 2^methb
+)
+q2a2 <- ols(log2_methb ~ cyp_score1, data = prima_base_d2); anova(q2a2)
+q2a3 <- ols(log2_methb ~ cyp_score2, data = prima_base_d2); anova(q2a3)
 
+AIC(q2a); AIC(q2a2); AIC(q2a3)
+BIC(q2a); BIC(q2a2); BIC(q2a3)
 
+q2a2_pred <- Predict(q2a2,
+                     cyp_score1 = seq(0, 2.5, by = 0.01),
+                     ref.zero = F) |>
+  as_tibble() |> 
+  mutate(yhat = 2^yhat,
+         lower = 2^lower,
+         upper = 2^upper); q2a2_pred
+q2a3_pred <- Predict(q2a3,
+                     cyp_score2 = seq(0, 2.5, by = 0.01),
+                     ref.zero = F) |>
+  as_tibble() |> 
+  mutate(yhat = 2^yhat,
+         lower = 2^lower,
+         upper = 2^upper); q2a2_pred
 
+prima_base_d2 |> 
+  ggplot() +
+  geom_point(aes(cyp_cat1, methb),
+             colour = 'black', alpha = 0.3) +
+  geom_point(aes(x = cyp_cat1, y = 2^methb),
+             data = ttest_df, shape = 5) +
+  geom_boxplot(aes(cyp_cat1, methb),
+               varwidth = TRUE, fill = 'transparent',
+               outlier.alpha = 0.5, outlier.size = 0.7,
+               width = 0.7, linewidth = 0.3, alpha = 0.3) +
+  scale_y_continuous(limits = c(0, 12),
+                     breaks = seq(0, 20, by = 2),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity',
+       y = 'Day-2 methaemoglobin (%)\n')
+prima_base_d2 |> 
+  ggplot() +
+  geom_point(aes(cyp_score1, methb),
+             colour = 'black', alpha = 0.3) +
+  geom_ribbon(aes(cyp_score1, ymin = lower, ymax = upper),
+              data = q2a2_pred, alpha = 0.25, fill = 'black') +
+  geom_line(aes(cyp_score1, y = yhat),
+            data = q2a2_pred, fill = 'black') +
+  scale_x_continuous(breaks = seq(0.25, 2, by = 0.25),
+                     limits = c(0.2, 2.05),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = c(0, 12),
+                     breaks = seq(0, 20, by = 2),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity score',
+       y = 'Day-2 methaemoglobin (%)\n')
+prima_base_d2 |> 
+  ggplot() +
+  geom_point(aes(cyp_score2, methb),
+             colour = 'black', alpha = 0.3) +
+  geom_ribbon(aes(cyp_score2, ymin = lower, ymax = upper),
+              data = q2a3_pred, alpha = 0.25, fill = 'black') +
+  geom_line(aes(cyp_score2, y = yhat),
+            data = q2a3_pred, fill = 'black') +
+  scale_x_continuous(breaks = seq(0.25, 2.5, by = 0.25),
+                     limits = c(0.2, 2.3),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = c(0, 12),
+                     breaks = seq(0, 20, by = 2),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity score',
+       y = 'Day-2 methaemoglobin (%)\n')
 
+# Question 2b
+# On day 2, methaemoglobin with 5,6-orthoquinone
+q2b0 <- ols(methb ~ orthoq, data = prima_base_d2); anova(q2b0)
+q2b <- ols(log2_methb ~ log2_orthoq, data = prima_base_d2); anova(q2b)
+q2b_ari <- ols(log2_methb ~ orthoq1000, data = prima_base_d2); anova(q2b_ari)
+# q2b_ari2 <- ols(log2_methb ~ orthoq1000 + age + sex, data = prima_base_d2); anova(q2b_ari2)
 
+AIC(q2b0); BIC(q2b0)
+AIC(q2b); BIC(q2b)
+# AIC(q2b_ari); BIC(q2b_ari)
+# AIC(q2b_ari2); BIC(q2b_ari2)
+
+2^q2b_ari$coefficients
+2^confint(q2b_ari)
+
+# 2^q2b_ari2$coefficients
+# 2^confint(q2b_ari2)
+
+q2b_pred <- Predict(q2b,
+                    log2_orthoq = log2(seq(50, 2500, by = 1)),
+                    ref.zero = F) |>
+  as_tibble(); q2b_pred
+q2b_ari_pred <- Predict(q2b_ari,
+                        orthoq1000 = seq(50, 2500, by = 1)/1000,
+                        ref.zero = F) |>
+  as_tibble() |> 
+  mutate(yhat = 2^yhat,
+         lower = 2^lower,
+         upper = 2^upper); q2b_ari_pred
+q2b_ari_pred2 <- Predict(q2b_ari2,
+                        orthoq1000 = seq(50, 2500, by = 1)/1000,
+                        ref.zero = F) |>
+  as_tibble() |> 
+  mutate(yhat = 2^yhat,
+         lower = 2^lower,
+         upper = 2^upper); q2b_ari_pred2
+
+# q2b_pred2 <- Predict(q2b,
+#                      conf.type = 'individual',
+#                      orthoq = seq(50, 2500, by = 1),
+#                      ref.zero = F) |>
+#   as_tibble() |> 
+#   mutate(yhat = 2^yhat,
+#          lower = 2^lower,
+#          upper = 2^upper)
+# q2b_pred2
+
+(q2b_ori_plot <- q2b_pred |> 
+  mutate(yhat = 2^yhat,
+         lower = 2^lower,
+         upper = 2^upper,
+         log2_orthoq = 2^log2_orthoq) |> 
+  ggplot() +
+  geom_point(data = prima_base_d2,
+             colour = 'black', alpha = 0.3,
+             aes(orthoq, y = methb_max_dayid)) +
+  # geom_ribbon(aes(x = orthoq, ymin = lower, ymax = upper),
+  #             alpha = 0.2, data = q2b_pred2) +
+  geom_ribbon(data = q2b_ari_pred,
+              aes(x = 1000 * orthoq1000, ymin = lower, ymax = upper),
+              alpha = 0.25, fill = 'black') +
+    geom_line(aes(x = 1000 * orthoq1000, y = yhat),
+              data = q2b_ari_pred, colour = 'black') +
+  # geom_ribbon(aes(x = log2_orthoq, ymin = lower, ymax = upper),
+  #             alpha = 0.25) +
+  # geom_line(aes(x = log2_orthoq, y = yhat), colour = 'black') +
+  scale_x_continuous(limits = c(50, 2000),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = c(0, 12),
+                     breaks = seq(0, 20, by = 2),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\n5,6-orthoquinone (ng/ml)',
+       y = 'Day-2 methaemoglobin (%)\n'))
+
+q2b_ari_pred |>
+  mutate(yhat = log2(yhat),
+         lower = log2(lower),
+         upper = log2(upper)) |> 
+    ggplot() +
+    geom_point(data = prima_base_d2,
+               colour = 'black', alpha = 0.3,
+               aes(orthoq, y = log2(methb_max_dayid))) +
+    geom_ribbon(aes(x = 1000 * orthoq1000, ymin = lower, ymax = upper),
+                alpha = 0.25, fill = 'black') +
+    geom_line(aes(x = 1000 * orthoq1000, y = yhat),
+              colour = 'black') +
+    scale_x_continuous(limits = c(50, 2000),
+                       expand = expansion(mult = c(0, 0))) +
+    scale_y_continuous(limits = log2(c(1, 16)),
+                       breaks = log2(2^seq(1, 15, by = 1)),
+                       labels = 2^seq(1, 15, by = 1),
+                       expand = expansion(mult = c(0, 0))) +
+    labs(x = '\n5,6-orthoquinone (ng/ml)',
+         y = 'Day-2 methaemoglobin (%)\n')
 
 
 
