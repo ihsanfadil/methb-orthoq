@@ -56,7 +56,7 @@ prima0to2 <- read_rds(file = here('data', 'prima0to2.rds')) |>
          methb_max_dayid = if_else(methb_max_dayid == -Inf, NA, methb_max_dayid),
          methb_q50_dayid = median(methb, na.rm = T)) |> 
   ungroup() |> 
-  mutate(cyp_cat1 = factor(cyp_cat1, levels = c('Intermediate', 'Normal')))
+  mutate(cyp_cat1 = factor(cyp_cat1, levels = c('Intermediate', 'Normal', 'Ultrarapid')))
 
 # Linear interpolation for AUC calculation
 prima0to2_imp <- prima0to2 |> 
@@ -471,8 +471,8 @@ prima_base |>
 prima_base |> 
   drop_na(cyp_cat1) |> 
   ggplot() +
-  geom_beeswarm(aes(y = log2(methb_max_dayid), x = day, colour = cyp_cat1),
-                dodge.width = 0.65, groupOnX = F, alpha = 0.3, size = 1.25) +
+  geom_jitter(aes(y = log2(methb_max_dayid), x = day, colour = cyp_cat1),
+                  alpha = 0.3, size = 1.25, width = 0.05) +
   geom_boxplot(aes(y = log2(methb_max_dayid), x = day, colour = cyp_cat1),
                varwidth = F, # !!!
                fill = 'transparent', outlier.shape = NA,
@@ -497,8 +497,8 @@ prima_base |>
 prima_base |> 
   drop_na(cyp_cat1) |> 
   ggplot() +
-  geom_beeswarm(aes(y = log2(methb_auc_dayid), x = day, colour = cyp_cat1),
-                dodge.width = 0.65, groupOnX = F, alpha = 0.3, size = 1.25) +
+  geom_jitter(aes(y = log2(methb_auc_dayid), x = day, colour = cyp_cat1),
+                alpha = 0.3, size = 1.25, width = 0.05) +
   geom_boxplot(aes(y = log2(methb_auc_dayid), x = day, colour = cyp_cat1),
                varwidth = F, # !!!
                fill = 'transparent', outlier.shape = NA,
@@ -691,8 +691,9 @@ prima_base |>
        x = '\nPrimaquine daily dose (mg/kg)',
        colour = 'CYP2D6 activity') +
   scale_colour_manual(
-    values = c('Normal' = '#536E85',
-               'Intermediate' = '#C82F46')
+    values = c('Normal' = '#E3932B',
+               'Intermediate' = '#C82F46',
+               'Ultrarapid' = '#536E85')
   ) +
   theme(legend.key.width = unit(0.5, 'cm'),
         # legend.position = 'top',
@@ -729,22 +730,27 @@ prima_base_d2 <- prima_base |>
 dd <- datadist(prima_base_d2)
 options(datadist = 'dd')
 
-# AUC
-q2a_auc <- ols(log2_methb_auc ~ cyp_cat1, data = prima_base_d2); anova(q2a_auc)
-ttest_auc <- t.test(log2_methb_auc ~ cyp_cat1, data = prima_base_d2, var.equal = T); ttest_auc
-ttest_mean_auc <- ttest_auc$estimate
-ttest_df <- tibble(
-  cyp_cat1 = c('Intermediate', 'Normal'),
-  methb = ttest_mean_auc,
-  methb2 = 2^methb
-)
-q2a2_auc <- ols(log2_methb_auc ~ cyp_score1, data = prima_base_d2); anova(q2a2_auc)
-q2a3_auc <- ols(log2_methb_auc ~ cyp_score2, data = prima_base_d2); anova(q2a3_auc)
+# # AUC
+# q2a_auc <- ols(log2_methb_auc ~ cyp_cat1, data = prima_base_d2); anova(q2a_auc)
+# ttest_auc <- t.test(log2_methb_auc ~ cyp_cat1, data = prima_base_d2, var.equal = T); ttest_auc
+# ttest_mean_auc <- ttest_auc$estimate
+# ttest_df <- tibble(
+#   cyp_cat1 = c('Intermediate', 'Normal'),
+#   methb = ttest_mean_auc,
+#   methb2 = 2^methb
+# )
+# q2a2_auc <- ols(log2_methb_auc ~ cyp_score1, data = prima_base_d2); anova(q2a2_auc)
+# q2a3_auc <- ols(log2_methb_auc ~ cyp_score2, data = prima_base_d2); anova(q2a3_auc)
 
 # Maximum
 # Question 2a
 # On day 2, methaemoglobin with CYP2D6 activity
-q2a <- ols(log2_methb ~ cyp_cat1, data = prima_base_d2); anova(q2a)
+q2a <- lm(log2_methb ~ cyp_cat1, data = prima_base_d2); anova(q2a)
+performance::check_model(q2a)
+performance::check_heteroscedasticity(q2a)
+residualsq2a <- residuals(q2a)
+qqnorm(residualsq2a); qqline(residualsq2a, col = '#C82F46'); shapiro.test(residualsq2a)
+
 ttest <- t.test(log2_methb ~ cyp_cat1, data = prima_base_d2, var.equal = T); ttest
 ttest_mean <- ttest$estimate
 ttest_df <- tibble(
@@ -752,8 +758,20 @@ ttest_df <- tibble(
   methb = ttest_mean,
   methb2 = 2^methb
 )
+
+q2a2_lm <- lm(log2_methb ~ cyp_score1, data = prima_base_d2); anova(q2a2_lm)
 q2a2 <- ols(log2_methb ~ cyp_score1, data = prima_base_d2); anova(q2a2)
+performance::check_model(q2a2_lm)
+performance::check_heteroscedasticity(q2a2_lm)
+residualsq2a2 <- residuals(q2a2_lm)
+qqnorm(residualsq2a2); qqline(residualsq2a2, col = '#C82F46'); shapiro.test(residualsq2a2)
+
+q2a3_lm <- lm(log2_methb ~ cyp_score2, data = prima_base_d2); anova(q2a3_lm)
 q2a3 <- ols(log2_methb ~ cyp_score2, data = prima_base_d2); anova(q2a3)
+performance::check_model(q2a3_lm)
+performance::check_heteroscedasticity(q2a3_lm)
+residualsq2a3 <- residuals(q2a3_lm)
+qqnorm(residualsq2a3); qqline(residualsq2a3, col = '#C82F46'); shapiro.test(residualsq2a3)
 
 AIC(q2a); AIC(q2a2); AIC(q2a3)
 BIC(q2a); BIC(q2a2); BIC(q2a3)
@@ -775,12 +793,12 @@ q2a3_pred <- Predict(q2a3,
 
 prima_base_d2 |> 
   ggplot() +
-  geom_point(aes(cyp_cat1, methb),
-             colour = 'black', alpha = 0.3) +
+  geom_jitter(aes(cyp_cat1, methb), width = 0.05,
+             colour = 'black', alpha = 0.3, size = 2) +
   geom_point(aes(x = cyp_cat1, y = 2^methb),
-             data = ttest_df, shape = 5) +
+             data = ttest_df, shape = 5, size = 2) +
   geom_boxplot(aes(cyp_cat1, methb),
-               varwidth = TRUE, fill = 'transparent',
+               varwidth = TRUE, fill = 'transparent', outlier.shape = NA,
                outlier.alpha = 0.5, outlier.size = 0.7,
                width = 0.7, linewidth = 0.3, alpha = 0.3) +
   scale_y_continuous(limits = c(0, 12),
@@ -824,17 +842,36 @@ prima_base_d2 |>
 # Question 2b
 # On day 2, methaemoglobin with 5,6-orthoquinone
 q2b0 <- ols(methb ~ orthoq, data = prima_base_d2); anova(q2b0)
-q2b <- ols(log2_methb ~ log2_orthoq, data = prima_base_d2); anova(q2b)
-q2b_ari <- ols(log2_methb ~ orthoq1000, data = prima_base_d2); anova(q2b_ari)
-# q2b_ari2 <- ols(log2_methb ~ orthoq1000 + age + sex, data = prima_base_d2); anova(q2b_ari2)
+q2b0_lm <- lm(methb ~ orthoq, data = prima_base_d2); anova(q2b0_lm)
+performance::check_model(q2b0_lm)
+performance::check_heteroscedasticity(q2b0_lm)
+performance::check_normality(q2b0_lm)
+residualsq2b0_lm <- residuals(q2b0_lm)
+qqnorm(residualsq2b0_lm); qqline(residualsq2b0_lm, col = "red"); shapiro.test(residualsq2b0_lm)
 
-AIC(q2b0); BIC(q2b0)
-AIC(q2b); BIC(q2b)
-# AIC(q2b_ari); BIC(q2b_ari)
-# AIC(q2b_ari2); BIC(q2b_ari2)
+q2b <- ols(log2_methb ~ log2_orthoq, data = prima_base_d2); anova(q2b)
+q2b_lm <- lm(log2_methb ~ log2_orthoq, data = prima_base_d2); anova(q2b_lm)
+performance::check_model(q2b_lm)
+performance::check_heteroscedasticity(q2b_lm)
+performance::check_normality(q2b_lm)
+residualsq2b_lm <- residuals(q2b_lm)
+qqnorm(residualsq2b_lm); qqline(residualsq2b_lm, col = "red"); shapiro.test(residualsq2b_lm)
+
+2^q2b$coefficients
+2^confint(q2b)
+
+q2b_ari <- ols(log2_methb ~ orthoq1000, data = prima_base_d2); anova(q2b_ari)
+q2b_ari_lm <- lm(log2_methb ~ orthoq1000, data = prima_base_d2); anova(q2b_ari_lm)
+performance::check_model(q2b_ari_lm)
+performance::check_heteroscedasticity(q2b_ari_lm)
+performance::check_normality(q2b_ari_lm)
+residualsq2b_ari_lm <- residuals(q2b_ari_lm)
+qqnorm(residualsq2b_ari_lm); qqline(residualsq2b_ari_lm, col = "red"); shapiro.test(residualsq2b_ari_lm)
 
 2^q2b_ari$coefficients
 2^confint(q2b_ari)
+
+AIC(q2b0_lm, q2b_lm, q2b_ari_lm)
 
 # 2^q2b_ari2$coefficients
 # 2^confint(q2b_ari2)
@@ -850,13 +887,13 @@ q2b_ari_pred <- Predict(q2b_ari,
   mutate(yhat = 2^yhat,
          lower = 2^lower,
          upper = 2^upper); q2b_ari_pred
-q2b_ari_pred2 <- Predict(q2b_ari2,
-                        orthoq1000 = seq(50, 2500, by = 1)/1000,
-                        ref.zero = F) |>
-  as_tibble() |> 
-  mutate(yhat = 2^yhat,
-         lower = 2^lower,
-         upper = 2^upper); q2b_ari_pred2
+# q2b_ari_pred2 <- Predict(q2b_ari2,
+#                         orthoq1000 = seq(50, 2500, by = 1)/1000,
+#                         ref.zero = F) |>
+#   as_tibble() |> 
+#   mutate(yhat = 2^yhat,
+#          lower = 2^lower,
+#          upper = 2^upper); q2b_ari_pred2
 
 # q2b_pred2 <- Predict(q2b,
 #                      conf.type = 'individual',
@@ -888,6 +925,7 @@ q2b_ari_pred2 <- Predict(q2b_ari2,
   #             alpha = 0.25) +
   # geom_line(aes(x = log2_orthoq, y = yhat), colour = 'black') +
   scale_x_continuous(limits = c(50, 2000),
+                     breaks = seq(0, 2000, by = 250),
                      expand = expansion(mult = c(0, 0))) +
   scale_y_continuous(limits = c(0, 12),
                      breaks = seq(0, 20, by = 2),
@@ -908,6 +946,7 @@ q2b_ari_pred |>
     geom_line(aes(x = 1000 * orthoq1000, y = yhat),
               colour = 'black') +
     scale_x_continuous(limits = c(50, 2000),
+                       breaks = seq(0, 2000, by = 250),
                        expand = expansion(mult = c(0, 0))) +
     scale_y_continuous(limits = log2(c(1, 16)),
                        breaks = log2(2^seq(1, 15, by = 1)),
@@ -916,11 +955,263 @@ q2b_ari_pred |>
     labs(x = '\n5,6-orthoquinone (ng/ml)',
          y = 'Day-2 methaemoglobin (%)\n')
 
+# Non-methaemoglobin ------------------------------------------------------
+prima_base_d2_nonmet <- prima_base |>
+  filter(day == 'Day 2') |>
+  drop_na(orthoq, cyp2d6) |> 
+  mutate(log2_orthoq = log2(orthoq),
+         log2_methb = log2(methb_max_dayid),
+         log2_methb_auc = log2(methb_auc_dayid),
+         methb = methb_max_dayid,
+         methb_auc = methb_auc_dayid,
+         mr_recip = 1/metab_ratio,
+         log2_mr_recip = log2(mr_recip),
+         orthoq1000 = orthoq/1000,
+         cyp_cat1_bin = if_else(cyp_score1 >= 1.25, 'Normal or ultrarapid', 'Intermediate'))
+dd_nonmet <- datadist(prima_base_d2_nonmet)
+options(datadist = 'dd_nonmet')
 
+# T-test
+cypcat_oqt_lm <- lm(log2_orthoq ~ cyp_cat1_bin, data = prima_base_d2_nonmet); anova(cypcat_oqt_lm)
+cypcat_oqt <- ols(log2_orthoq ~ cyp_cat1_bin, data = prima_base_d2_nonmet); anova(cypcat_oqt)
+performance::check_model(cypcat_oqt_lm)
+performance::check_heteroscedasticity(cypcat_oqt_lm)
+performance::check_normality(cypcat_oqt_lm)
+residualscypcat_oqt_lm <- residuals(cypcat_oqt_lm)
+qqnorm(residualscypcat_oqt_lm); qqline(residualscypcat_oqt_lm, col = "red"); shapiro.test(residualscypcat_oqt_lm)
 
+ttest_cypcat_oqt <- t.test(log2_orthoq ~ cyp_cat1_bin, data = prima_base_d2_nonmet); 
+performance::check_heteroscedasticity(cypcat_oqt)
+residualst <- residuals(cypcat_oqt)
+qqnorm(residualst); qqline(residualst, col = "red"); shapiro.test(residualst)
 
+ttest_mean_oqt <- ttest_cypcat_oqt$estimate
+(ttest_df_oq <- tibble(
+  cyp_cat1_bin = c('Intermediate', 'Normal or ultrarapid'),
+  oq = ttest_mean_oq,
+  oq2 = 2^oq
+))
 
+prima_base_d2_nonmet |>
+  ggplot() +
+  geom_jitter(aes(cyp_cat1_bin, log2_orthoq), width = 0.05,
+                colour = 'black', alpha = 0.3, size = 2) +
+  geom_point(aes(x = cyp_cat1_bin, y = oq),
+             data = ttest_df_oq, shape = 5, size = 2) +
+  geom_boxplot(aes(cyp_cat1_bin, log2_orthoq),
+               varwidth = TRUE, fill = 'transparent', outlier.shape = NA,
+               outlier.alpha = 0.5, outlier.size = 0.7,
+               width = 0.7, linewidth = 0.3, alpha = 0.3) +
+  scale_y_continuous(limits = log2(c(64, 8192)),
+                     breaks = log2(2^seq(1, 15, by = 1)),
+                     labels = 2^seq(1, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity',
+       y = '5,6-orthoquinone (ng/ml)\n')
 
+# Heteroscedastic 1
+cypcat_oq_cont <- ols(log2_orthoq ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_oq_cont)
+cypcat_oq_cont_lm <- lm(log2_orthoq ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_lm)
+performance::check_model(cypcat_oq_cont_lm)
+performance::check_heteroscedasticity(cypcat_oq_cont_lm)
+performance::check_normality(cypcat_oq_cont_lm)
+residualscypcat_oq_cont_lm <- residuals(cypcat_oq_cont_lm)
+qqnorm(residualscypcat_oq_cont_lm); qqline(residualscypcat_oq_cont_lm, col = "red"); shapiro.test(residualscypcat_oq_cont_lm)
+
+cypcat_oq_cont_pred <- Predict(cypcat_oq_cont,
+                     cyp_score1 = seq(0, 3.5, by = 0.01),
+                     ref.zero = F) |>
+  as_tibble(); cypcat_oq_cont_pred
+
+prima_base_d2_nonmet |> 
+  ggplot() +
+  geom_point(aes(cyp_score1, log2(orthoq)),
+             colour = 'black', alpha = 0.3) +
+  geom_ribbon(aes(cyp_score1, ymin = lower, ymax = upper),
+              data = cypcat_oq_cont_pred, alpha = 0.25, fill = 'black') +
+  geom_line(aes(cyp_score1, y = yhat),
+            data = cypcat_oq_cont_pred, fill = 'black') +
+  scale_x_continuous(breaks = seq(0.25, 3, by = 0.25),
+                     limits = c(0.15, 3.15),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(64, 8192)),
+                     breaks = log2(2^seq(1, 15, by = 1)),
+                     labels = 2^seq(1, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity score',
+       y = '5,6-orthoquinone (ng/ml)\n')
+
+# Heteroscedastic 2
+cypcat_oq_cont2 <- ols(log2_orthoq ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_oq_cont2)
+cypcat_oq_cont_lm2 <- lm(log2_orthoq ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_lm2)
+performance::check_model(cypcat_oq_cont_lm2)
+performance::check_heteroscedasticity(cypcat_oq_cont_lm2)
+performance::check_normality(cypcat_oq_cont_lm2)
+residualscypcat_oq_cont_lm2 <- residuals(cypcat_oq_cont_lm2)
+qqnorm(residualscypcat_oq_cont_lm2); qqline(residualscypcat_oq_cont_lm2, col = "red"); shapiro.test(residualscypcat_oq_cont_lm2)
+
+cypcat_oq_cont_pred2 <- Predict(cypcat_oq_cont2,
+                               cyp_score2 = seq(0, 3.5, by = 0.01),
+                               ref.zero = F) |>
+  as_tibble(); cypcat_oq_cont_pred2
+
+prima_base_d2_nonmet |> 
+  ggplot() +
+  geom_point(aes(cyp_score2, log2(orthoq)),
+             colour = 'black', alpha = 0.3) +
+  geom_ribbon(aes(cyp_score2, ymin = lower, ymax = upper),
+              data = cypcat_oq_cont_pred2, alpha = 0.25, fill = 'black') +
+  geom_line(aes(cyp_score2, y = yhat),
+            data = cypcat_oq_cont_pred2, fill = 'black') +
+  scale_x_continuous(breaks = seq(0.25, 3, by = 0.25),
+                     limits = c(0.15, 3.15),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(64, 8192)),
+                     breaks = log2(2^seq(1, 15, by = 1)),
+                     labels = 2^seq(1, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity score',
+       y = '5,6-orthoquinone (ng/ml)\n')
+
+# CYP2D6 non-normality of residuals
+cypcat_oq_cont_rev <- ols(cyp_score1 ~ orthoq, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_rev)
+cypcat_oq_cont_rev_lm <- lm(cyp_score1 ~ orthoq, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_rev_lm)
+performance::check_model(cypcat_oq_cont_rev_lm)
+performance::check_heteroscedasticity(cypcat_oq_cont_rev_lm)
+performance::check_normality(cypcat_oq_cont_rev_lm)
+residualscypcat_oq_cont_rev_lm <- residuals(cypcat_oq_cont_rev_lm)
+qqnorm(residualscypcat_oq_cont_rev_lm); qqline(residualscypcat_oq_cont_rev_lm, col = "red"); shapiro.test(residualscypcat_oq_cont_rev_lm)
+
+cypcat_oq_cont_pred_rev <- Predict(cypcat_oq_cont_rev,
+                                   orthoq = seq(20, 8000, by = 1),
+                                   ref.zero = F) |>
+  as_tibble(); cypcat_oq_cont_pred_rev
+
+prima_base_d2_nonmet |> 
+  ggplot() +
+  geom_point(aes(y = cyp_score1, x = orthoq),
+             colour = 'black', alpha = 0.3) +
+  geom_ribbon(aes(x = orthoq, ymin = lower, ymax = upper),
+              data = cypcat_oq_cont_pred_rev, alpha = 0.25, fill = 'black') +
+  geom_line(aes(x = orthoq, y = yhat),
+            data = cypcat_oq_cont_pred_rev) +
+  # scale_x_continuous(breaks = seq(0.25, 3, by = 0.25),
+  #                    limits = c(0.15, 3.15),
+  #                    expand = expansion(mult = c(0, 0))) +
+  # scale_y_continuous(limits = log2(c(64, 8192)),
+  #                    breaks = log2(2^seq(1, 15, by = 1)),
+  #                    labels = 2^seq(1, 15, by = 1),
+  #                    expand = expansion(mult = c(0, 0))) +
+  labs(y = 'CYP2D6 activity score\n',
+       x = '\n5,6-orthoquinone (ng/ml)')
+
+cypcat_oq_cont_rev2 <- ols(cyp_score2 ~ orthoq, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_rev2)
+cypcat_oq_cont_rev_lm2 <- lm(cyp_score2 ~ orthoq, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_rev_lm2)
+performance::check_model(cypcat_oq_cont_rev_lm2)
+performance::check_heteroscedasticity(cypcat_oq_cont_rev_lm2)
+performance::check_normality(cypcat_oq_cont_rev_lm2)
+residualscypcat_oq_cont_rev_lm2 <- residuals(cypcat_oq_cont_rev_lm2)
+qqnorm(residualscypcat_oq_cont_rev_lm); qqline(residualscypcat_oq_cont_rev_lm, col = "red"); shapiro.test(residualscypcat_oq_cont_rev_lm)
+
+# Reciprocal of metabolic ratio i.e., 1/(urine pq/urin oq)
+# T-test
+cypcat_mr_lm <- lm(log2_mr_recip ~ cyp_cat1_bin, data = prima_base_d2_nonmet); anova(cypcat_mr_lm)
+cypcat_mr <- ols(log2_mr_recip ~ cyp_cat1_bin, data = prima_base_d2_nonmet); anova(cypcat_mr)
+performance::check_model(cypcat_mr_lm)
+performance::check_heteroscedasticity(cypcat_mr_lm)
+performance::check_normality(cypcat_mr_lm)
+residualscypcat_mr_lm <- residuals(cypcat_mr_lm)
+qqnorm(residualscypcat_mr_lm); qqline(residualscypcat_mr_lm, col = "red"); shapiro.test(residualscypcat_mr_lm)
+
+ttest_cypcat_mr <- t.test(log2_mr_recip ~ cyp_cat1_bin, data = prima_base_d2_nonmet)
+
+ttest_mean_mr <- ttest_cypcat_mr$estimate
+(ttest_df_mr <- tibble(
+  cyp_cat1_bin = c('Intermediate', 'Normal or ultrarapid'),
+  mr = ttest_mean_mr,
+  mr2 = 2^mr
+))
+
+prima_base_d2_nonmet |>
+  ggplot() +
+  geom_jitter(aes(cyp_cat1_bin, log2_mr_recip), width = 0.05,
+              colour = 'black', alpha = 0.3, size = 2) +
+  geom_point(aes(x = cyp_cat1_bin, y = mr),
+             data = ttest_df_mr, shape = 5, size = 2) +
+  geom_boxplot(aes(cyp_cat1_bin, log2_mr_recip),
+               varwidth = TRUE, fill = 'transparent', outlier.shape = NA,
+               outlier.alpha = 0.5, outlier.size = 0.7,
+               width = 0.7, linewidth = 0.3, alpha = 0.3) +
+  scale_y_continuous(limits = log2(c(0.07, 10)),
+                     breaks = log2(2^seq(-5, 15, by = 1)),
+                     labels = 2^seq(-5, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity',
+       y = 'Reciprocal of metabolic ratio\n')
+
+# Homoscedastic + normal errors!
+cypcat_mr_cont <- ols(log2_mr_recip ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_mr_cont)
+cypcat_mr_cont_lm <- lm(log2_mr_recip ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_mr_cont_lm)
+performance::check_model(cypcat_mr_cont_lm)
+performance::check_heteroscedasticity(cypcat_mr_cont_lm)
+performance::check_normality(cypcat_mr_cont_lm)
+residualscypcat_mr_cont_lm <- residuals(cypcat_mr_cont_lm)
+qqnorm(residualscypcat_mr_cont_lm); qqline(residualscypcat_mr_cont_lm, col = "red"); shapiro.test(residualscypcat_mr_cont_lm)
+
+cypcat_mr_cont_pred <- Predict(cypcat_mr_cont,
+                               cyp_score1 = seq(0, 3.5, by = 0.01),
+                               ref.zero = F) |>
+  as_tibble(); cypcat_mr_cont_pred
+
+prima_base_d2_nonmet |> 
+  ggplot() +
+  geom_point(aes(cyp_score1, log2_mr_recip),
+             colour = 'black', alpha = 0.3) +
+  geom_ribbon(aes(cyp_score1, ymin = lower, ymax = upper),
+              data = cypcat_mr_cont_pred, alpha = 0.25, fill = 'black') +
+  geom_line(aes(cyp_score1, y = yhat),
+            data = cypcat_mr_cont_pred, fill = 'black') +
+  scale_x_continuous(breaks = seq(0.25, 3, by = 0.25),
+                     limits = c(0.15, 3.15),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(0.07, 10)),
+                     breaks = log2(2^seq(-5, 15, by = 1)),
+                     labels = 2^seq(-5, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity score',
+       y = 'Reciprocal of metabolic ratio\n')
+
+# Homoscedastic + normal error! (2)
+cypcat_mr_cont2 <- ols(log2_mr_recip ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_mr_cont2)
+cypcat_mr_cont_lm2 <- lm(log2_mr_recip ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_mr_cont_lm2)
+performance::check_model(cypcat_mr_cont_lm2)
+performance::check_heteroscedasticity(cypcat_mr_cont_lm2)
+performance::check_normality(cypcat_mr_cont_lm2)
+residualscypcat_mr_cont_lm2 <- residuals(cypcat_mr_cont_lm2)
+qqnorm(residualscypcat_mr_cont_lm2); qqline(residualscypcat_mr_cont_lm2, col = "red"); shapiro.test(residualscypcat_mr_cont_lm2)
+
+cypcat_mr_cont_pred2 <- Predict(cypcat_mr_cont2,
+                                cyp_score2 = seq(0, 3.5, by = 0.01),
+                               ref.zero = F) |>
+  as_tibble(); cypcat_mr_cont_pred2
+
+prima_base_d2_nonmet |> 
+  ggplot() +
+  geom_point(aes(cyp_score2, log2_mr_recip),
+             colour = 'black', alpha = 0.3) +
+  geom_ribbon(aes(cyp_score2, ymin = lower, ymax = upper),
+              data = cypcat_mr_cont_pred2, alpha = 0.25, fill = 'black') +
+  geom_line(aes(cyp_score2, y = yhat),
+            data = cypcat_mr_cont_pred2, fill = 'black') +
+  scale_x_continuous(breaks = seq(0.25, 3, by = 0.25),
+                     limits = c(0.15, 3.15),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(0.07, 10)),
+                     breaks = log2(2^seq(-5, 15, by = 1)),
+                     labels = 2^seq(-5, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nCYP2D6 activity score',
+       y = 'Reciprocal of metabolic ratio\n')
 
 
 

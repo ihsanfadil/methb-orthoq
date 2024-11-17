@@ -341,14 +341,18 @@ prima0to2 <- full_join(clean_demog,
            cyp_score1 == 0 ~ 'Poor',
            cyp_score1 <= 1 ~ 'Intermediate',
            cyp_score1 <= 2.25 ~ 'Normal',
-           cyp_score1 > 2.25 ~ 'Ultrarapid'
-           ),
+           cyp_score1 > 2.25 ~ 'Ultrarapid',
+           is.na(cyp_score1) ~ NA_character_,
+           TRUE ~ 'Check me!'
+           ) |> factor(),
          cyp_cat2 = case_when(
-           cyp_score1 == 0 ~ 'Poor',
-           cyp_score1 <= 1 ~ 'Intermediate',
-           cyp_score1 <= 2.25 ~ 'Normal',
-           cyp_score1 > 2.25 ~ 'Ultrarapid'
-         )) |> 
+           cyp_score2 == 0 ~ 'Poor',
+           cyp_score2 <= 1 ~ 'Intermediate',
+           cyp_score2 <= 2.25 ~ 'Normal',
+           cyp_score2 > 2.25 ~ 'Ultrarapid',
+           is.na(cyp_score2) ~ NA_character_,
+           TRUE ~ 'Check me!'
+         ) |> factor()) |> 
   select(
     # Demographics
     patid, clinid, age, sex, weight,
