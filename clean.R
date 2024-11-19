@@ -27,6 +27,21 @@ raw_weight <- read_excel(path = here('data', 'G6PD Prima_15112024.xlsx')) |>
   rename(patid = 'Subject ID',
          weight = Weight) |> 
   mutate(weight = as.numeric(weight))
+raw_oq <- read_excel(path = here('data', 'dfcomplete5.xlsx')) |> 
+  select(id,
+         pqd0, oqd0, mrvalued0,
+         pqd1, oqd1, mrvalued1,
+         pqd2, oqd2, mrvalued2) |> 
+  rename(patid = id) |> 
+  mutate(pqd0 = as.numeric(pqd0),
+         oqd0 = as.numeric(oqd0),
+         mrvalued0 = as.numeric(mrvalued0),
+         pqd1 = as.numeric(pqd1),
+         oqd1 = as.numeric(oqd1),
+         mrvalued1 = as.numeric(mrvalued1),
+         pqd2 = as.numeric(pqd2),
+         oqd2 = as.numeric(oqd2),
+         mrvalued2 = as.numeric(mrvalued2))
 
 # Demographics ------------------------------------------------------------
 raw_demog <- raw_dat[, 1:9]
@@ -322,6 +337,7 @@ prima0to2 <- full_join(clean_demog,
   full_join(clean_g6pd, by = c('patid')) |> 
   select(-weight) |> 
   full_join(raw_weight, by = c('patid')) |> 
+  full_join(raw_oq, by = c('patid')) |> 
   mutate(datetime = ymd_hm(datetime),
          methb = as.numeric(methb),
          pqmg_per_tab = 15,
@@ -369,7 +385,10 @@ prima0to2 <- full_join(clean_demog,
     # Lab. measures
     cyp2d6, cyp_score1, cyp_score2, cyp_score, cyp_cat1, cyp_cat2,
     g6pd1, g6pd2, g6pd_avg,
-    orthoq, metab_ratio
+    orthoq, metab_ratio,
+    pqd0, oqd0, mrvalued0,
+    pqd1, oqd1, mrvalued1,
+    pqd2, oqd2, mrvalued2
   ) |> 
   mutate(pqmgkgday_cat = case_when(
     pqmgkgday < 0.375 ~ 'Low',
@@ -377,7 +396,16 @@ prima0to2 <- full_join(clean_demog,
     pqmgkgday >= 0.75 ~ 'High',
     is.na(pqmgkgday) ~ NA_character_,
     TRUE ~ 'Check me!') |> 
-      factor(levels = c('Low', 'Intermediate', 'High')))
+      factor(levels = c('Low', 'Intermediate', 'High'))) |> 
+  rowwise() |> 
+  mutate(oq_avg = exp(mean(log(c(oqd0, oqd1, oqd2)), na.rm = T)),
+         pq_avg = exp(mean(log(c(pqd0, pqd1, pqd2)), na.rm = T)),
+         mrvalue_avg = pq_avg/oq_avg) |> 
+  ungroup() |> 
+  mutate(
+    orthoq = if_else(is.na(orthoq), oq_avg, orthoq),
+    metab_ratio = if_else(is.na(metab_ratio), mrvalue_avg, metab_ratio)
+  )
 
 # Assumed a mismeasurement
 prima0to2 <- prima0to2 |> 

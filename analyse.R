@@ -5,7 +5,7 @@
 #               score
 # About       : Graphical representation of data,
 #               graphical summaries of data,
-#               modelling (graphical depictions, numerical estimates)
+#               model estimates (graphical and numerical)
 
 # Setup -------------------------------------------------------------------
 library(tidyverse)
@@ -184,8 +184,6 @@ prima0to2 %>%
 prima0to2 %>%
   drop_na(methb) %>% # Do better here!
   ggplot() +
-  annotate("rect", xmin = c(8, 17), xmax = c(9, 18), ymin = -Inf, ymax = Inf,
-           fill = '#918580', alpha = 0.3) +
   geom_vline(xintercept = c(0, 9, 18),
              linetype = 'dotted') +
   geom_line(aes(x = timepoint_cont,
@@ -673,7 +671,8 @@ cyp_score <- cyp_score[2:length(cyp_score)]
 ### Maximum
 prima_base |> 
   drop_na(cyp_cat1) |> 
-  filter(day == 'Day 2') |> 
+  mutate(cyp_cat1 = if_else(cyp_cat1 == 'Ultrarapid' | cyp_cat1 == 'Normal', 'Normal or ultrarapid', 'Intermediate')) |> 
+  filter(day == 'Day 2') |>
   ggplot() +
   geom_vline(xintercept = 1, linetype = 'dotted') +
   geom_point(aes(y = log2(orthoq), x = pqmgkgday, colour = cyp_cat1),
@@ -691,9 +690,8 @@ prima_base |>
        x = '\nPrimaquine daily dose (mg/kg)',
        colour = 'CYP2D6 activity') +
   scale_colour_manual(
-    values = c('Normal' = '#E3932B',
-               'Intermediate' = '#C82F46',
-               'Ultrarapid' = '#536E85')
+    values = c('Normal or ultrarapid' = '#E3932B',
+               'Intermediate' = '#C82F46')
   ) +
   theme(legend.key.width = unit(0.5, 'cm'),
         # legend.position = 'top',
@@ -726,7 +724,8 @@ prima_base_d2 <- prima_base |>
          log2_methb_auc = log2(methb_auc_dayid),
          methb = methb_max_dayid,
          methb_auc = methb_auc_dayid,
-         orthoq1000 = orthoq/1000)
+         orthoq1000 = orthoq/1000,
+         cyp_cat1 = factor(cyp_cat1, levels = c('Intermediate', 'Normal')))
 dd <- datadist(prima_base_d2)
 options(datadist = 'dd')
 
@@ -746,6 +745,7 @@ options(datadist = 'dd')
 # Question 2a
 # On day 2, methaemoglobin with CYP2D6 activity
 q2a <- lm(log2_methb ~ cyp_cat1, data = prima_base_d2); anova(q2a)
+gtsummary::tbl_regression(q2a)
 performance::check_model(q2a)
 performance::check_heteroscedasticity(q2a)
 residualsq2a <- residuals(q2a)
@@ -761,12 +761,14 @@ ttest_df <- tibble(
 
 q2a2_lm <- lm(log2_methb ~ cyp_score1, data = prima_base_d2); anova(q2a2_lm)
 q2a2 <- ols(log2_methb ~ cyp_score1, data = prima_base_d2); anova(q2a2)
+gtsummary::tbl_regression(q2a2_lm)
 performance::check_model(q2a2_lm)
 performance::check_heteroscedasticity(q2a2_lm)
 residualsq2a2 <- residuals(q2a2_lm)
 qqnorm(residualsq2a2); qqline(residualsq2a2, col = '#C82F46'); shapiro.test(residualsq2a2)
 
 q2a3_lm <- lm(log2_methb ~ cyp_score2, data = prima_base_d2); anova(q2a3_lm)
+gtsummary::tbl_regression(q2a3_lm)
 q2a3 <- ols(log2_methb ~ cyp_score2, data = prima_base_d2); anova(q2a3)
 performance::check_model(q2a3_lm)
 performance::check_heteroscedasticity(q2a3_lm)
@@ -808,7 +810,7 @@ prima_base_d2 |>
        y = 'Day-2 methaemoglobin (%)\n')
 prima_base_d2 |> 
   ggplot() +
-  geom_point(aes(cyp_score1, methb),
+  geom_point(aes(cyp_score1, methb), size = 2,
              colour = 'black', alpha = 0.3) +
   geom_ribbon(aes(cyp_score1, ymin = lower, ymax = upper),
               data = q2a2_pred, alpha = 0.25, fill = 'black') +
@@ -824,7 +826,7 @@ prima_base_d2 |>
        y = 'Day-2 methaemoglobin (%)\n')
 prima_base_d2 |> 
   ggplot() +
-  geom_point(aes(cyp_score2, methb),
+  geom_point(aes(cyp_score2, methb), size = 2,
              colour = 'black', alpha = 0.3) +
   geom_ribbon(aes(cyp_score2, ymin = lower, ymax = upper),
               data = q2a3_pred, alpha = 0.25, fill = 'black') +
@@ -974,13 +976,14 @@ options(datadist = 'dd_nonmet')
 # T-test
 cypcat_oqt_lm <- lm(log2_orthoq ~ cyp_cat1_bin, data = prima_base_d2_nonmet); anova(cypcat_oqt_lm)
 cypcat_oqt <- ols(log2_orthoq ~ cyp_cat1_bin, data = prima_base_d2_nonmet); anova(cypcat_oqt)
+gtsummary::tbl_regression(cypcat_oqt_lm)
 performance::check_model(cypcat_oqt_lm)
 performance::check_heteroscedasticity(cypcat_oqt_lm)
 performance::check_normality(cypcat_oqt_lm)
 residualscypcat_oqt_lm <- residuals(cypcat_oqt_lm)
 qqnorm(residualscypcat_oqt_lm); qqline(residualscypcat_oqt_lm, col = "red"); shapiro.test(residualscypcat_oqt_lm)
 
-ttest_cypcat_oqt <- t.test(log2_orthoq ~ cyp_cat1_bin, data = prima_base_d2_nonmet); 
+ttest_cypcat_oqt <- t.test(log2_orthoq ~ cyp_cat1_bin, data = prima_base_d2_nonmet);ttest_cypcat_oqt
 performance::check_heteroscedasticity(cypcat_oqt)
 residualst <- residuals(cypcat_oqt)
 qqnorm(residualst); qqline(residualst, col = "red"); shapiro.test(residualst)
@@ -1013,6 +1016,7 @@ prima_base_d2_nonmet |>
 cypcat_oq_cont <- ols(log2_orthoq ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_oq_cont)
 cypcat_oq_cont_lm <- lm(log2_orthoq ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_lm)
 performance::check_model(cypcat_oq_cont_lm)
+gtsummary::tbl_regression(cypcat_oq_cont_lm)
 performance::check_heteroscedasticity(cypcat_oq_cont_lm)
 performance::check_normality(cypcat_oq_cont_lm)
 residualscypcat_oq_cont_lm <- residuals(cypcat_oq_cont_lm)
@@ -1044,6 +1048,7 @@ prima_base_d2_nonmet |>
 # Heteroscedastic 2
 cypcat_oq_cont2 <- ols(log2_orthoq ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_oq_cont2)
 cypcat_oq_cont_lm2 <- lm(log2_orthoq ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_lm2)
+gtsummary::tbl_regression(cypcat_oq_cont_lm2)
 performance::check_model(cypcat_oq_cont_lm2)
 performance::check_heteroscedasticity(cypcat_oq_cont_lm2)
 performance::check_normality(cypcat_oq_cont_lm2)
@@ -1095,13 +1100,13 @@ prima_base_d2_nonmet |>
               data = cypcat_oq_cont_pred_rev, alpha = 0.25, fill = 'black') +
   geom_line(aes(x = orthoq, y = yhat),
             data = cypcat_oq_cont_pred_rev) +
-  # scale_x_continuous(breaks = seq(0.25, 3, by = 0.25),
-  #                    limits = c(0.15, 3.15),
-  #                    expand = expansion(mult = c(0, 0))) +
-  # scale_y_continuous(limits = log2(c(64, 8192)),
-  #                    breaks = log2(2^seq(1, 15, by = 1)),
-  #                    labels = 2^seq(1, 15, by = 1),
-  #                    expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(breaks = seq(0, 6000, by = 2000),
+                     limits = c(0, 6100),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = c(0, 3.8),
+                     breaks = seq(0, 3, by = 1),
+                     # labels = 2^seq(1, 15, by = 1),
+                     expand = expansion(mult = c(0, 0))) +
   labs(y = 'CYP2D6 activity score\n',
        x = '\n5,6-orthoquinone (ng/ml)')
 
@@ -1117,6 +1122,7 @@ qqnorm(residualscypcat_oq_cont_rev_lm); qqline(residualscypcat_oq_cont_rev_lm, c
 # T-test
 cypcat_mr_lm <- lm(log2_mr_recip ~ cyp_cat1_bin, data = prima_base_d2_nonmet); anova(cypcat_mr_lm)
 cypcat_mr <- ols(log2_mr_recip ~ cyp_cat1_bin, data = prima_base_d2_nonmet); anova(cypcat_mr)
+gtsummary::tbl_regression(cypcat_mr_lm)
 performance::check_model(cypcat_mr_lm)
 performance::check_heteroscedasticity(cypcat_mr_lm)
 performance::check_normality(cypcat_mr_lm)
@@ -1152,6 +1158,7 @@ prima_base_d2_nonmet |>
 # Homoscedastic + normal errors!
 cypcat_mr_cont <- ols(log2_mr_recip ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_mr_cont)
 cypcat_mr_cont_lm <- lm(log2_mr_recip ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_mr_cont_lm)
+gtsummary::tbl_regression(cypcat_mr_cont_lm)
 performance::check_model(cypcat_mr_cont_lm)
 performance::check_heteroscedasticity(cypcat_mr_cont_lm)
 performance::check_normality(cypcat_mr_cont_lm)
@@ -1184,6 +1191,7 @@ prima_base_d2_nonmet |>
 # Homoscedastic + normal error! (2)
 cypcat_mr_cont2 <- ols(log2_mr_recip ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_mr_cont2)
 cypcat_mr_cont_lm2 <- lm(log2_mr_recip ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_mr_cont_lm2)
+gtsummary::tbl_regression(cypcat_mr_cont_lm2)
 performance::check_model(cypcat_mr_cont_lm2)
 performance::check_heteroscedasticity(cypcat_mr_cont_lm2)
 performance::check_normality(cypcat_mr_cont_lm2)
