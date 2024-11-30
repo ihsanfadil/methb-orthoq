@@ -16,6 +16,8 @@ library(ggbeeswarm)
 library(lme4)
 library(pracma)
 library(zoo)
+library(psych)
+library(DescTools)
 
 # Plot customisation
 # Set plots to some format
@@ -184,6 +186,8 @@ prima0to2 %>%
 prima0to2 %>%
   drop_na(methb) %>% # Do better here!
   ggplot() +
+  annotate("rect", xmin = c(8, 17), xmax = c(9, 18), ymin = -Inf, ymax = Inf,
+           fill = '#918580', alpha = 0.3) +
   geom_vline(xintercept = c(0, 9, 18),
              linetype = 'dotted') +
   geom_line(aes(x = timepoint_cont,
@@ -751,13 +755,22 @@ performance::check_heteroscedasticity(q2a)
 residualsq2a <- residuals(q2a)
 qqnorm(residualsq2a); qqline(residualsq2a, col = '#C82F46'); shapiro.test(residualsq2a)
 
-ttest <- t.test(log2_methb ~ cyp_cat1, data = prima_base_d2, var.equal = T); ttest
-ttest_mean <- ttest$estimate
+ttest <- t.test(log2_methb ~ cyp_cat1,
+                data = prima_base_d2 |> mutate(cyp_cat1 = relevel(cyp_cat1, ref = 'Normal')),
+                var.equal = T); ttest
+2^(ttest$estimate[1] - ttest$estimate[2])
+2^(ttest$conf.int)
 ttest_df <- tibble(
   cyp_cat1 = c('Intermediate', 'Normal'),
   methb = ttest_mean,
   methb2 = 2^methb
 )
+# Equal variance?
+prima_base_d2 |> 
+  group_by(cyp_cat1) |> 
+  summarise(sd = sd(log2_methb)) |> 
+  pull(sd) -> sd
+sd[2] / sd[1] # rule of thumb <3
 
 q2a2_lm <- lm(log2_methb ~ cyp_score1, data = prima_base_d2); anova(q2a2_lm)
 q2a2 <- ols(log2_methb ~ cyp_score1, data = prima_base_d2); anova(q2a2)
@@ -781,65 +794,137 @@ BIC(q2a); BIC(q2a2); BIC(q2a3)
 q2a2_pred <- Predict(q2a2,
                      cyp_score1 = seq(0, 2.5, by = 0.01),
                      ref.zero = F) |>
-  as_tibble() |> 
-  mutate(yhat = 2^yhat,
-         lower = 2^lower,
-         upper = 2^upper); q2a2_pred
+  as_tibble(); q2a2_pred
 q2a3_pred <- Predict(q2a3,
                      cyp_score2 = seq(0, 2.5, by = 0.01),
                      ref.zero = F) |>
-  as_tibble() |> 
-  mutate(yhat = 2^yhat,
-         lower = 2^lower,
-         upper = 2^upper); q2a2_pred
+  as_tibble(); q2a3_pred
 
 prima_base_d2 |> 
   ggplot() +
-  geom_jitter(aes(cyp_cat1, methb), width = 0.05,
-             colour = 'black', alpha = 0.3, size = 2) +
-  geom_point(aes(x = cyp_cat1, y = 2^methb),
+  geom_jitter(aes(cyp_cat1, log2(methb)), width = 0.05,
+              colour = 'black', alpha = 0.3, size = 2) +
+  geom_point(aes(x = cyp_cat1, y = methb),
              data = ttest_df, shape = 5, size = 2) +
-  geom_boxplot(aes(cyp_cat1, methb),
+  geom_boxplot(aes(cyp_cat1, log2(methb)),
                varwidth = TRUE, fill = 'transparent', outlier.shape = NA,
                outlier.alpha = 0.5, outlier.size = 0.7,
                width = 0.7, linewidth = 0.3, alpha = 0.3) +
-  scale_y_continuous(limits = c(0, 12),
-                     breaks = seq(0, 20, by = 2),
-                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(1.05, 16)),
+                     breaks = log2(c(1, 2, 4, 8, 16)),
+                     labels = c(1, 2, 4, 8, 16),
+                     expand = expansion(mult = c(0.1, 0.1))) +
   labs(x = '\nCYP2D6 activity',
        y = 'Day-2 methaemoglobin (%)\n')
+
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2$log2_methb, as.numeric(prima_base_d2$cyp_cat1) - 1),
+       n.iter = 10000,
+       method = "spearman")
+RSqCI(q2a, conf.level = 0.95, adjusted = F)
+
+# Logistic-regression
+logit_cyp1 <- glm(cyp_cat1 ~ log2_methb,
+                  family = "binomial", data = prima_base_d2)
+broom::tidy(logit_cyp1, exponentiate = T, conf.int = T)
+
+# prima_base_d2 |>
+#   ggplot() +
+#   geom_jitter(aes(cyp_cat1, methb), width = 0.05,
+#              colour = 'black', alpha = 0.3, size = 2) +
+#   geom_point(aes(x = cyp_cat1, y = 2^methb),
+#              data = ttest_df, shape = 5, size = 2) +
+#   geom_boxplot(aes(cyp_cat1, methb),
+#                varwidth = TRUE, fill = 'transparent', outlier.shape = NA,
+#                outlier.alpha = 0.5, outlier.size = 0.7,
+#                width = 0.7, linewidth = 0.3, alpha = 0.3) +
+#   scale_y_continuous(limits = c(0, 12),
+#                      breaks = seq(0, 20, by = 2),
+#                      expand = expansion(mult = c(0, 0))) +
+#   labs(x = '\nCYP2D6 activity',
+#        y = 'Day-2 methaemoglobin (%)\n')
+
 prima_base_d2 |> 
   ggplot() +
-  geom_point(aes(cyp_score1, methb), size = 2,
+  geom_point(aes(cyp_score1, log2(methb)), size = 2,
              colour = 'black', alpha = 0.3) +
   geom_ribbon(aes(cyp_score1, ymin = lower, ymax = upper),
               data = q2a2_pred, alpha = 0.25, fill = 'black') +
   geom_line(aes(cyp_score1, y = yhat),
-            data = q2a2_pred, fill = 'black') +
-  scale_x_continuous(breaks = seq(0.25, 2, by = 0.25),
-                     limits = c(0.2, 2.05),
+            data = q2a2_pred, colour = 'black') +
+  scale_x_continuous(breaks = seq(0.25, 2.5, by = 0.25),
+                     limits = c(0.1, 2.5),
                      expand = expansion(mult = c(0, 0))) +
-  scale_y_continuous(limits = c(0, 12),
-                     breaks = seq(0, 20, by = 2),
-                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(1.05, 16)),
+                     breaks = log2(c(1, 2, 4, 8, 16)),
+                     labels = c(1, 2, 4, 8, 16),
+                     expand = expansion(mult = c(0.1, 0.1))) +
   labs(x = '\nCYP2D6 activity score',
        y = 'Day-2 methaemoglobin (%)\n')
+
+# Spearman-rank
+cor.ci(data.frame(prima_base_d2$cyp_score1, log2(prima_base_d2$methb)),
+       n.iter = 10000,
+       method = "spearman")
+RSqCI(q2a2_lm, conf.level = 0.95, adjusted = F) # Based on wrong model
+
+# prima_base_d2 |> 
+#   ggplot() +
+#   geom_point(aes(cyp_score1, methb), size = 2,
+#              colour = 'black', alpha = 0.3) +
+#   geom_ribbon(aes(cyp_score1, ymin = lower, ymax = upper),
+#               data = q2a2_pred, alpha = 0.25, fill = 'black') +
+#   geom_line(aes(cyp_score1, y = yhat),
+#             data = q2a2_pred, fill = 'black') +
+#   scale_x_continuous(breaks = seq(0.25, 2, by = 0.25),
+#                      limits = c(0.2, 2.05),
+#                      expand = expansion(mult = c(0, 0))) +
+#   scale_y_continuous(limits = c(0, 12),
+#                      breaks = seq(0, 20, by = 2),
+#                      expand = expansion(mult = c(0, 0))) +
+#   labs(x = '\nCYP2D6 activity score',
+#        y = 'Day-2 methaemoglobin (%)\n')
+
 prima_base_d2 |> 
   ggplot() +
-  geom_point(aes(cyp_score2, methb), size = 2,
+  geom_point(aes(cyp_score2, log2(methb)), size = 2,
              colour = 'black', alpha = 0.3) +
   geom_ribbon(aes(cyp_score2, ymin = lower, ymax = upper),
               data = q2a3_pred, alpha = 0.25, fill = 'black') +
   geom_line(aes(cyp_score2, y = yhat),
-            data = q2a3_pred, fill = 'black') +
+            data = q2a3_pred, colour = 'black') +
   scale_x_continuous(breaks = seq(0.25, 2.5, by = 0.25),
-                     limits = c(0.2, 2.3),
+                     limits = c(0.1, 2.5),
                      expand = expansion(mult = c(0, 0))) +
-  scale_y_continuous(limits = c(0, 12),
-                     breaks = seq(0, 20, by = 2),
-                     expand = expansion(mult = c(0, 0))) +
+  scale_y_continuous(limits = log2(c(1.05, 16)),
+                     breaks = log2(c(1, 2, 4, 8, 16)),
+                     labels = c(1, 2, 4, 8, 16),
+                     expand = expansion(mult = c(0.1, 0.1))) +
   labs(x = '\nCYP2D6 activity score',
        y = 'Day-2 methaemoglobin (%)\n')
+
+# Spearman-rank
+cor.ci(data.frame(prima_base_d2$cyp_score2, log2(prima_base_d2$methb)),
+       n.iter = 10000,
+       method = "spearman")
+RSqCI(q2a3_lm, conf.level = 0.95, adjusted = F) # Based on wrong model
+
+# prima_base_d2 |> 
+#   ggplot() +
+#   geom_point(aes(cyp_score2, methb), size = 2,
+#              colour = 'black', alpha = 0.3) +
+#   geom_ribbon(aes(cyp_score2, ymin = lower, ymax = upper),
+#               data = q2a3_pred, alpha = 0.25, fill = 'black') +
+#   geom_line(aes(cyp_score2, y = yhat),
+#             data = q2a3_pred, fill = 'black') +
+#   scale_x_continuous(breaks = seq(0.25, 2.5, by = 0.25),
+#                      limits = c(0.2, 2.3),
+#                      expand = expansion(mult = c(0, 0))) +
+#   scale_y_continuous(limits = c(0, 12),
+#                      breaks = seq(0, 20, by = 2),
+#                      expand = expansion(mult = c(0, 0))) +
+#   labs(x = '\nCYP2D6 activity score',
+#        y = 'Day-2 methaemoglobin (%)\n')
 
 # Question 2b
 # On day 2, methaemoglobin with 5,6-orthoquinone
@@ -957,6 +1042,12 @@ q2b_ari_pred |>
     labs(x = '\n5,6-orthoquinone (ng/ml)',
          y = 'Day-2 methaemoglobin (%)\n')
 
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2$orthoq, log2(prima_base_d2$methb_max_dayid)),
+       n.iter = 10000,
+       method = "pearson") # Bootstrapping
+RSqCI(q2b_ari_lm, conf.level = 0.95, adjusted = F)
+
 # Non-methaemoglobin ------------------------------------------------------
 prima_base_d2_nonmet <- prima_base |>
   filter(day == 'Day 2') |>
@@ -983,7 +1074,14 @@ performance::check_normality(cypcat_oqt_lm)
 residualscypcat_oqt_lm <- residuals(cypcat_oqt_lm)
 qqnorm(residualscypcat_oqt_lm); qqline(residualscypcat_oqt_lm, col = "red"); shapiro.test(residualscypcat_oqt_lm)
 
-ttest_cypcat_oqt <- t.test(log2_orthoq ~ cyp_cat1_bin, data = prima_base_d2_nonmet);ttest_cypcat_oqt
+prima_base_d2_nonmet <- prima_base_d2_nonmet |> 
+  mutate(cyp_cat1_bin = factor(cyp_cat1_bin),
+         cyp_cat1_bin = relevel(cyp_cat1_bin, ref = 'Normal or ultrarapid'))
+ttest_cypcat_oqt <- t.test(log2_orthoq ~ cyp_cat1_bin,
+                           data = prima_base_d2_nonmet)
+2^(ttest_cypcat_oqt$estimate[1] - ttest_cypcat_oqt$estimate[2])
+2^(ttest_cypcat_oqt$conf.int)
+
 performance::check_heteroscedasticity(cypcat_oqt)
 residualst <- residuals(cypcat_oqt)
 qqnorm(residualst); qqline(residualst, col = "red"); shapiro.test(residualst)
@@ -1012,6 +1110,17 @@ prima_base_d2_nonmet |>
   labs(x = '\nCYP2D6 activity',
        y = '5,6-orthoquinone (ng/ml)\n')
 
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2_nonmet$log2_orthoq,
+                  as.numeric(as.factor(prima_base_d2_nonmet$cyp_cat1_bin)) - 1),
+       n.iter = 10000,
+       method = "spearman")
+RSqCI(cypcat_oqt_lm, conf.level = 0.95, adjusted = F)
+# Logistic-regression
+logit_cyp_bin1 <- glm(as.factor(cyp_cat1_bin) ~ log2_orthoq,
+                      family = "binomial", data = prima_base_d2_nonmet)
+broom::tidy(logit_cyp_bin1, exponentiate = T, conf.int = T)
+
 # Heteroscedastic 1
 cypcat_oq_cont <- ols(log2_orthoq ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_oq_cont)
 cypcat_oq_cont_lm <- lm(log2_orthoq ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_lm)
@@ -1034,7 +1143,7 @@ prima_base_d2_nonmet |>
   geom_ribbon(aes(cyp_score1, ymin = lower, ymax = upper),
               data = cypcat_oq_cont_pred, alpha = 0.25, fill = 'black') +
   geom_line(aes(cyp_score1, y = yhat),
-            data = cypcat_oq_cont_pred, fill = 'black') +
+            data = cypcat_oq_cont_pred, colour = 'black') +
   scale_x_continuous(breaks = seq(0.25, 3, by = 0.25),
                      limits = c(0.15, 3.15),
                      expand = expansion(mult = c(0, 0))) +
@@ -1044,6 +1153,13 @@ prima_base_d2_nonmet |>
                      expand = expansion(mult = c(0, 0))) +
   labs(x = '\nCYP2D6 activity score',
        y = '5,6-orthoquinone (ng/ml)\n')
+
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2_nonmet$cyp_score1,
+                  log2(prima_base_d2_nonmet$orthoq)),
+       n.iter = 10000,
+       method = "spearman") # Bootstrapping
+RSqCI(cypcat_oq_cont_lm, conf.level = 0.95, adjusted = F) # Wrong model
 
 # Heteroscedastic 2
 cypcat_oq_cont2 <- ols(log2_orthoq ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_oq_cont2)
@@ -1067,7 +1183,7 @@ prima_base_d2_nonmet |>
   geom_ribbon(aes(cyp_score2, ymin = lower, ymax = upper),
               data = cypcat_oq_cont_pred2, alpha = 0.25, fill = 'black') +
   geom_line(aes(cyp_score2, y = yhat),
-            data = cypcat_oq_cont_pred2, fill = 'black') +
+            data = cypcat_oq_cont_pred2, colour = 'black') +
   scale_x_continuous(breaks = seq(0.25, 3, by = 0.25),
                      limits = c(0.15, 3.15),
                      expand = expansion(mult = c(0, 0))) +
@@ -1077,6 +1193,13 @@ prima_base_d2_nonmet |>
                      expand = expansion(mult = c(0, 0))) +
   labs(x = '\nCYP2D6 activity score',
        y = '5,6-orthoquinone (ng/ml)\n')
+
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2_nonmet$cyp_score2,
+                  log2(prima_base_d2_nonmet$orthoq)),
+       n.iter = 10000,
+       method = "spearman") # Bootstrapping
+RSqCI(cypcat_oq_cont_lm2, conf.level = 0.95, adjusted = F) # Wrong model
 
 # CYP2D6 non-normality of residuals
 cypcat_oq_cont_rev <- ols(cyp_score1 ~ orthoq, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_rev)
@@ -1109,6 +1232,12 @@ prima_base_d2_nonmet |>
                      expand = expansion(mult = c(0, 0))) +
   labs(y = 'CYP2D6 activity score\n',
        x = '\n5,6-orthoquinone (ng/ml)')
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2_nonmet$cyp_score1,
+                  prima_base_d2_nonmet$orthoq),
+       n.iter = 10000,
+       method = "spearman") # Bootstrapping
+RSqCI(cypcat_oq_cont_rev_lm, conf.level = 0.95, adjusted = F) # Wrong model
 
 cypcat_oq_cont_rev2 <- ols(cyp_score2 ~ orthoq, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_rev2)
 cypcat_oq_cont_rev_lm2 <- lm(cyp_score2 ~ orthoq, data = prima_base_d2_nonmet); anova(cypcat_oq_cont_rev_lm2)
@@ -1130,6 +1259,8 @@ residualscypcat_mr_lm <- residuals(cypcat_mr_lm)
 qqnorm(residualscypcat_mr_lm); qqline(residualscypcat_mr_lm, col = "red"); shapiro.test(residualscypcat_mr_lm)
 
 ttest_cypcat_mr <- t.test(log2_mr_recip ~ cyp_cat1_bin, data = prima_base_d2_nonmet)
+2^(ttest_cypcat_mr$estimate[1] - ttest_cypcat_mr$estimate[2])
+2^(ttest_cypcat_mr$conf.int)
 
 ttest_mean_mr <- ttest_cypcat_mr$estimate
 (ttest_df_mr <- tibble(
@@ -1154,8 +1285,21 @@ prima_base_d2_nonmet |>
                      expand = expansion(mult = c(0, 0))) +
   labs(x = '\nCYP2D6 activity',
        y = 'Reciprocal of metabolic ratio\n')
+# Correlation coefficient and R-squared
+prima_base_d2_nonmet <- prima_base_d2_nonmet |> 
+  mutate(cyp_cat1_bin = factor(cyp_cat1_bin),
+         cyp_cat1_bin = relevel(cyp_cat1_bin, ref = 'Intermediate'))
+cor.ci(data.frame(prima_base_d2_nonmet$log2_mr_recip,
+                  as.numeric(prima_base_d2_nonmet$cyp_cat1_bin) - 1),
+       n.iter = 10000,
+       method = "spearman")
+RSqCI(cypcat_oqt_lm, conf.level = 0.95, adjusted = F)
+# Logistic-regression
+logit_mr_recip <- glm(as.factor(cyp_cat1_bin) ~ log2_mr_recip,
+                      family = "binomial", data = prima_base_d2_nonmet)
+broom::tidy(logit_mr_recip, exponentiate = T, conf.int = T)
 
-# Homoscedastic + normal errors!
+# Homoscedastic + normal errors! But not continuous theoretically
 cypcat_mr_cont <- ols(log2_mr_recip ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_mr_cont)
 cypcat_mr_cont_lm <- lm(log2_mr_recip ~ cyp_score1, data = prima_base_d2_nonmet); anova(cypcat_mr_cont_lm)
 gtsummary::tbl_regression(cypcat_mr_cont_lm)
@@ -1187,8 +1331,14 @@ prima_base_d2_nonmet |>
                      expand = expansion(mult = c(0, 0))) +
   labs(x = '\nCYP2D6 activity score',
        y = 'Reciprocal of metabolic ratio\n')
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2_nonmet$cyp_score1,
+                  log2(prima_base_d2_nonmet$mr_recip)),
+       n.iter = 10000,
+       method = "spearman") # Bootstrapping
+RSqCI(cypcat_mr_cont_lm, conf.level = 0.95, adjusted = F) # Wrong model
 
-# Homoscedastic + normal error! (2)
+# Homoscedastic + normal error! (2) but not continuous theoretically
 cypcat_mr_cont2 <- ols(log2_mr_recip ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_mr_cont2)
 cypcat_mr_cont_lm2 <- lm(log2_mr_recip ~ cyp_score2, data = prima_base_d2_nonmet); anova(cypcat_mr_cont_lm2)
 gtsummary::tbl_regression(cypcat_mr_cont_lm2)
@@ -1220,10 +1370,67 @@ prima_base_d2_nonmet |>
                      expand = expansion(mult = c(0, 0))) +
   labs(x = '\nCYP2D6 activity score',
        y = 'Reciprocal of metabolic ratio\n')
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2_nonmet$cyp_score2,
+                  log2(prima_base_d2_nonmet$mr_recip)),
+       n.iter = 10000,
+       method = "spearman") # Bootstrapping
+RSqCI(cypcat_mr_cont_lm2, conf.level = 0.95, adjusted = F) # Wrong model
 
+# Prediction models -------------------------------------------------------
+prima_base_d2_nonmet <- prima_base_d2_nonmet |> 
+  mutate(cyp2d6_bin = ifelse(cyp_cat1_bin == 'Intermediate', 1, 0))
+logit_cyp_bin1_mr <- lrm(cyp2d6_bin ~ log2_mr_recip + age + sex,
+                         data = prima_base_d2_nonmet,
+                         x = T,
+                         y = T)
+calibration <- calibrate(logit_cyp_bin1_mr, method = "boot", B = 10000)
+plot(calibration)
 
+calib_data <- tibble(
+  predicted = calibration[, "predy"],
+  observed = calibration[, "calibrated.orig"],
+  type = 'Apparent'
+) |> bind_rows(
+  tibble(
+    predicted = calibration[, "predy"],
+    observed = calibration[, "calibrated.corrected"],
+    type = 'Bias-corrected'
+  )
+)
 
+calib_plot <- calib_data |> 
+  ggplot() +
+  geom_point(colour = 'transparent',
+             aes(x = predicted, y = observed)) +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dotted") +
+  geom_line(aes(x = predicted, y = observed, colour = type),
+            linewidth = 0.8) +
+  labs(x = '\nEstimated probability',
+       y = 'Actual probability\n',
+       colour = '') +
+  scale_y_continuous(limits = c(0.05, 0.6),
+                     labels = seq(0, 1, by = 0.1),
+                     breaks = seq(0, 1, by = 0.1))+
+  scale_x_continuous(limits = c(0.05, 0.6),
+                     labels = seq(0, 1, by = 0.1),
+                     breaks = seq(0, 1, by = 0.1)) +
+  theme(legend.position = c(0.8, 0.2),
+        legend.background = element_rect(fill = "transparent", color = NA),
+        legend.key = element_rect(fill = "transparent", color = NA),
+        legend.text = element_text(colour = "black", size = 8)) +
+  scale_colour_manual(
+    values = c('Bias-corrected' = '#C82F46',
+               'Apparent' = '#E3932B')
+  )
+calib_plot
 
+validation <- validate(logit_cyp_bin1_mr, method = "boot", B = 10000)
+auc <- validation['Dxy', 1:5] / 2 + 0.5; auc
+
+# Further development -----------------------------------------------------
+# 'Posthoc-sample-size-calculation'-like plots
+# Multilevel models: time, patient, day
 
 
 
