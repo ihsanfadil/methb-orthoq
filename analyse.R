@@ -726,6 +726,8 @@ prima_base_d2 <- prima_base |>
   mutate(log2_orthoq = log2(orthoq),
          log2_methb = log2(methb_max_dayid),
          log2_methb_auc = log2(methb_auc_dayid),
+         mr_recip = 1/metab_ratio,
+         log2_mr_recip = log2(mr_recip),
          methb = methb_max_dayid,
          methb_auc = methb_auc_dayid,
          orthoq1000 = orthoq/1000,
@@ -1047,6 +1049,56 @@ cor.ci(data.frame(prima_base_d2$orthoq, log2(prima_base_d2$methb_max_dayid)),
        n.iter = 10000,
        method = "pearson") # Bootstrapping
 RSqCI(q2b_ari_lm, conf.level = 0.95, adjusted = F)
+
+# Question 2b
+# On day 2, methaemoglobin with reciprocal of metabolic ratio
+q2b_ari_metab <- ols(log2_methb ~ log2_mr_recip, data = prima_base_d2); anova(q2b_ari_metab)
+q2b_ari_metab_lm <- lm(log2_methb ~ log2_mr_recip, data = prima_base_d2); anova(q2b_ari_metab_lm)
+performance::check_model(q2b_ari_metab_lm)
+performance::check_heteroscedasticity(q2b_ari_metab_lm)
+performance::check_normality(q2b_ari_metab_lm)
+residualsq2b_ari_lm_metab <- residuals(q2b_ari_metab_lm)
+qqnorm(residualsq2b_ari_lm_metab); qqline(residualsq2b_ari_lm_metab, col = "red"); shapiro.test(residualsq2b_ari_lm_metab)
+
+2^q2b_ari_metab$coefficients
+2^confint(q2b_ari_metab)
+
+q2b_ari_pred_metab <- Predict(q2b_ari_metab,
+                              log2_mr_recip = log2(seq(0.125/4, 4, by = 0.01)),
+                              ref.zero = F) |>
+  as_tibble() |> 
+  mutate(yhat = 2^yhat,
+         lower = 2^lower,
+         upper = 2^upper); q2b_ari_pred_metab
+
+q2b_ari_pred_metab |>
+  mutate(yhat = log2(yhat),
+         lower = log2(lower),
+         upper = log2(upper)) |> 
+  ggplot() +
+  geom_point(data = prima_base_d2,
+             colour = 'black', alpha = 0.3,
+             aes(log2_mr_recip, y = log2(methb_max_dayid))) +
+  geom_ribbon(aes(x = log2_mr_recip, ymin = lower, ymax = upper),
+              alpha = 0.25, fill = 'black') +
+  geom_line(aes(x = log2_mr_recip, y = yhat),
+            colour = 'black') +
+  scale_y_continuous(limits = log2(c(0.8, 16)),
+                     breaks = log2(c(1, 2, 4, 8, 16)),
+                     labels = c(1, 2, 4, 8, 16),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(limits = log2(c(0.041, 4)),
+                     breaks = log2(c(0.125/2, 0.125, 0.25, 0.5, 1, 2, 4)),
+                     labels = c(0.125/2, 0.125, 0.25, 0.5, 1, 2, 4),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = '\nReciprocal of metabolic ratio',
+       y = 'Day-2 methaemoglobin (%)\n')
+
+# Correlation coefficient and R-squared
+cor.ci(data.frame(prima_base_d2$log2_mr_recip, log2(prima_base_d2$methb_max_dayid)),
+       n.iter = 10000,
+       method = "pearson") # Bootstrapping
+RSqCI(q2b_ari_metab_lm, conf.level = 0.95, adjusted = F)
 
 # Non-methaemoglobin ------------------------------------------------------
 prima_base_d2_nonmet <- prima_base |>
