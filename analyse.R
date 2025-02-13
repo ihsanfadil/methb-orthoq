@@ -27,7 +27,7 @@ theme_set(theme_bw())
 
 ## Further refinement
 theme_update(
-  text = element_text(size = 10, family = "Foundry Sterling"), # Font
+  text = element_text(size = 12, family = "Foundry Sterling"), # Font
   plot.title = element_text(hjust = 0),      # Centre-align title
   plot.subtitle = element_text(hjust = 0),   # Centre-align subtitle
   legend.title = element_text(colour = 'black',
@@ -207,6 +207,11 @@ prima0to2 %>%
        caption = 'Daily pre-dose measurements at timepoints 0, 9, and 18')
 
 # Methaemoglobin over timepoints, connected (by CYP2D6)
+median_by_cyp2d6 <- prima0to2 %>%
+  drop_na(methb) %>%
+  group_by(timepoint_cont, cyp_cat1) |> 
+  summarise(mean = mean(log2(methb), na.rm = T))
+  
 prima0to2 %>%
   drop_na(methb) %>% # Do better here!
   ggplot() +
@@ -218,7 +223,11 @@ prima0to2 %>%
                 y = log2(methb),
                 group = patid,
                 colour = cyp_cat1),
-            alpha = 0.7, linewidth = 0.8) +
+            alpha = 0.25, linewidth = 0.8) +
+  geom_line(aes(x = timepoint_cont,
+                y = mean,
+                colour = cyp_cat1),
+            alpha = 1, linewidth = 1.2, data = median_by_cyp2d6) +
   scale_x_continuous(limits = c(0, 26),
                      breaks = seq(0, 26, by = 1),
                      expand = expansion(mult = c(0, 0))) +
@@ -488,7 +497,7 @@ prima_base |>
                      labels = c(1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32),
                      expand = expansion(mult = c(0, 0))) +
   labs(x = '',
-       y = 'Maximum methaemoglobin (%)\n',
+       y = 'Methaemoglobin (%)\n',
        colour = 'CYP2D6 activity') +
   scale_colour_manual(
     values = c('Intermediate' = '#C82F46',
@@ -1128,7 +1137,7 @@ qqnorm(residualscypcat_oqt_lm); qqline(residualscypcat_oqt_lm, col = "red"); sha
 
 prima_base_d2_nonmet <- prima_base_d2_nonmet |> 
   mutate(cyp_cat1_bin = factor(cyp_cat1_bin),
-         cyp_cat1_bin = relevel(cyp_cat1_bin, ref = 'Normal or ultrarapid'))
+         cyp_cat1_bin = relevel(cyp_cat1_bin, ref = 'Intermediate'))
 ttest_cypcat_oqt <- t.test(log2_orthoq ~ cyp_cat1_bin,
                            data = prima_base_d2_nonmet)
 2^(ttest_cypcat_oqt$estimate[1] - ttest_cypcat_oqt$estimate[2])
@@ -1483,6 +1492,30 @@ auc <- validation['Dxy', 1:5] / 2 + 0.5; auc
 # Further development -----------------------------------------------------
 # 'Posthoc-sample-size-calculation'-like plots
 # Multilevel models: time, patient, day
+
+multi_methb <- prima0to2 |> 
+  drop_na(methb, cyp_cat1) |> 
+  mutate(cyp_bin = if_else(cyp_cat1 == 'Intermediate',
+                           'Intermediate',
+                           'Normal/ultrarapid'),
+         log2_methb = log2(methb))
+
+null <- lmer(log2_methb ~ day + (1 | patid), data = multi_methb)
+multi_lm <- lmer(log2_methb ~ cyp_bin + day + (1 | patid), data = multi_methb)
+anova(null, multi_lm)
+multi_lm; confint(multi_lm)
+performance::check_model(multi_lm)
+
+
+
+
+
+
+
+
+
+
+
 
 
 
